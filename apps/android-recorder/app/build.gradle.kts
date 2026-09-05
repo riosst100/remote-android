@@ -1,6 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// Release signing credentials live outside version control in
+// keystore.properties (see .gitignore) rather than hardcoded here.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val hasReleaseSigning = keystorePropertiesFile.exists()
+if (hasReleaseSigning) {
+    keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
 android {
@@ -14,25 +25,34 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        // 10.24.182.78 = this dev machine's LAN IP, reachable from a
-        // physical device on the same Wi-Fi. Emulators would instead use
-        // 10.0.2.2 (the emulator's alias for the host's localhost).
-        buildConfigField("String", "API_BASE_URL", "\"http://10.24.182.78:8002\"")
-        buildConfigField("String", "WS_HOST", "\"10.24.182.78\"")
-        buildConfigField("int", "WS_PORT", "8080")
-        buildConfigField("boolean", "WS_TLS", "false")
-        buildConfigField("String", "REVERB_APP_KEY", "\"d4akrvncqwpiycso6mrj\"")
+        // Production server: Nginx terminates TLS on 443 and reverse-proxies
+        // /app to Reverb's internal port 8080 (see backend/laravel's Nginx
+        // site config), so the app talks to port 443 for both API and WS.
+        buildConfigField("String", "API_BASE_URL", "\"https://remote-android.inovasionline.com\"")
+        buildConfigField("String", "WS_HOST", "\"remote-android.inovasionline.com\"")
+        buildConfigField("int", "WS_PORT", "443")
+        buildConfigField("boolean", "WS_TLS", "true")
+        buildConfigField("String", "REVERB_APP_KEY", "\"428bda9ed6d2cce55051463b807f1d2a\"")
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            buildConfigField("String", "API_BASE_URL", "\"https://your-server.example.com\"")
-            buildConfigField("String", "WS_HOST", "\"your-server.example.com\"")
-            buildConfigField("int", "WS_PORT", "443")
-            buildConfigField("boolean", "WS_TLS", "true")
-            buildConfigField("String", "REVERB_APP_KEY", "\"REPLACE_WITH_REVERB_APP_KEY\"")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isMinifyEnabled = false

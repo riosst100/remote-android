@@ -24,7 +24,10 @@ class DeviceDashboardController extends Controller
 
     public function show(Device $device, AudioConfigurationResolver $resolver): View
     {
-        $device->load(['recordings' => fn ($q) => $q->latest('id')->limit(20)]);
+        $device->load([
+            'recordings' => fn ($q) => $q->latest('id')->limit(20),
+            'schedules' => fn ($q) => $q->orderBy('day_of_week')->orderBy('time_of_day'),
+        ]);
 
         $presets = $this->selectablePresets();
         $previewConfigs = $this->resolveConfigsFor($device, $presets, $resolver);

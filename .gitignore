@@ -20,10 +20,17 @@ backend/laravel/storage/logs/*
 backend/laravel/database/database.sqlite
 backend/laravel/public/hot
 backend/laravel/public/storage
+backend/laravel/public/downloads/*
+!backend/laravel/public/downloads/.gitkeep
 backend/laravel/bootstrap/cache/*.php
 !backend/laravel/bootstrap/cache/.gitkeep
 
 # --- Android agent ---
+# Release signing keystore and its credentials — never commit. Losing this
+# file means future releases can no longer update-in-place over an already
+# installed APK; back it up somewhere safe outside this repo.
+apps/android-recorder/keystore/
+apps/android-recorder/keystore.properties
 apps/android-recorder/.gradle/
 apps/android-recorder/build/
 apps/android-recorder/app/build/

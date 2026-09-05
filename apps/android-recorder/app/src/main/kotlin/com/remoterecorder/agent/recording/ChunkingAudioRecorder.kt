@@ -89,17 +89,49 @@ class ChunkingAudioRecorder(
         if (isRecording) startNextChunk()
     }
 
-    /** Stops the active recorder (if any) and emits its finished chunk. */
+    /**
+     * Stops the active recorder (if any) and emits its finished chunk.
+     *
+     * MediaRecorder.stop() throwing is a real, OEM-visible failure mode
+     * (observed on Xiaomi/MIUI in particular, e.g. when a chunk is very
+     * short) — but release() must run regardless, since a MediaRecorder
+     * that's never released keeps holding the microphone: the recording
+     * indicator stays on and the mic is unusable until the process dies,
+     * even though the app itself has moved on to IDLE. That's the
+     * try/finally below, not just a try/catch.
+     */
     private fun finishCurrentChunk(): ChunkFile? {
         val current = recorder ?: return null
         val currentChunkNumber = chunkNumber
+        recorder = null
+
+        var stopFailed = false
+        try {
+            current.stop()
+        } catch (e: Exception) {
+            AgentLog.e("recorder", "MediaRecorder.stop() failed for chunk #$currentChunkNumber; releasing anyway.", e)
+            stopFailed = true
+        } finally {
+            runCatching { current.release() }
+        }
+
+        if (stopFailed) {
+            onError(IllegalStateException("MediaRecorder.stop() failed for chunk #$currentChunkNumber"))
+            return null
+        }
 
         return try {
-            current.stop()
-            current.release()
-            recorder = null
-
             val file = ChunkFileStore.fileFor(context, currentChunkNumber)
+
+            // Some OEM encoders (observed on Xiaomi/MIUI) can still be
+            // flushing the last write(s) to disk for a brief moment after
+            // stop() returns; hashing immediately can checksum a file that
+            // hasn't finished being written, which then mismatches whatever
+            // OkHttp actually reads moments later when the upload happens.
+            // Waiting for the file's size to stop changing is a cheap,
+            // portable way to know the OS is done writing it.
+            waitForFileToStabilize(file)
+
             val checksum = sha256(file)
             val duration = estimateDurationSeconds(file, chunkTargetSeconds)
 
@@ -127,6 +159,23 @@ class ChunkingAudioRecorder(
             setAudioEncodingBitRate(config.bitrate)
             setAudioChannels(config.channels)
             setOutputFile(outputFile.absolutePath)
+        }
+    }
+
+    /**
+     * Polls the file's size a few times a short distance apart and returns
+     * once two consecutive reads agree, as a portable proxy for "the OS has
+     * finished writing this file." There's no cross-OEM API that reports
+     * this directly, so size-stability is the practical signal — bounded to
+     * a handful of short checks so a chunk can never hang here indefinitely.
+     */
+    private fun waitForFileToStabilize(file: File) {
+        var previousSize = -1L
+        repeat(5) {
+            val currentSize = file.length()
+            if (currentSize == previousSize && currentSize > 0) return
+            previousSize = currentSize
+            Thread.sleep(40)
         }
     }
 

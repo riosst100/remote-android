@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('devices:sweep-stale')->everyMinute();
+Schedule::command('schedules:run-due')->everyMinute();

@@ -62,6 +62,81 @@
     <button id="stop-btn" class="danger" data-recording="{{ $active->uuid ?? '' }}" {{ $active ? '' : 'disabled' }}>Stop Recording</button>
 </div>
 
+<div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">Scheduled Recordings</h3>
+    <p class="muted">Times are Asia/Jakarta (WIB / UTC+7). Each schedule starts a recording at the given day and time every week and stops it automatically after the set duration.</p>
+
+    <table style="margin-bottom:16px;">
+        <thead><tr><th>Day</th><th>Time</th><th>Preset</th><th>Duration</th><th>Status</th><th>Last Ran</th><th></th></tr></thead>
+        <tbody>
+        @forelse ($device->schedules as $schedule)
+            <tr>
+                <td>{{ $schedule->dayName() }}</td>
+                <td>{{ \Illuminate\Support\Str::of($schedule->time_of_day)->substr(0, 5) }}</td>
+                <td>{{ $schedule->preset->value }}</td>
+                <td>{{ $schedule->duration_minutes }} min</td>
+                <td>
+                    <form method="POST" action="{{ route('devices.schedules.toggle', [$device, $schedule]) }}" style="display:inline;">
+                        @csrf
+                        <button type="submit" class="{{ $schedule->is_active ? '' : 'muted' }}" style="padding:2px 10px;font-size:12px;">
+                            {{ $schedule->is_active ? 'Active' : 'Disabled' }}
+                        </button>
+                    </form>
+                </td>
+                <td class="muted">{{ optional($schedule->last_run_at)->diffForHumans() ?? 'never' }}</td>
+                <td>
+                    <form method="POST" action="{{ route('devices.schedules.destroy', [$device, $schedule]) }}" style="display:inline;" onsubmit="return confirm('Remove this schedule?');">
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit" class="danger" style="padding:4px 10px;font-size:12px;">Remove</button>
+                    </form>
+                </td>
+            </tr>
+        @empty
+            <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
+        @endforelse
+        </tbody>
+    </table>
+
+    <form method="POST" action="{{ route('devices.schedules.store', $device) }}" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        @csrf
+        <div>
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Day</label>
+            <select name="day_of_week" required>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5" selected>Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Time (WIB)</label>
+            <input type="time" name="time_of_day" value="03:30" required>
+        </div>
+        <div>
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Preset</label>
+            <select name="preset" required>
+                @foreach ($presets as $preset)
+                    <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>{{ $preset->value }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div>
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Duration (minutes)</label>
+            <input type="number" name="duration_minutes" value="30" min="1" max="480" required style="width:90px;">
+        </div>
+        <button type="submit" class="primary">Add Schedule</button>
+    </form>
+
+    @error('day_of_week') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
+    @error('time_of_day') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
+    @error('preset') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
+    @error('duration_minutes') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
+</div>
+
 <div class="card">
     <h3 style="margin-top:0;">Recording History</h3>
     <table>

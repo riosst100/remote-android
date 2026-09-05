@@ -45,6 +45,11 @@ class Device extends Model
         return $this->hasMany(DeviceCommand::class);
     }
 
+    public function schedules(): HasMany
+    {
+        return $this->hasMany(RecordingSchedule::class);
+    }
+
     public function isOnline(): bool
     {
         if (! $this->last_seen_at) {
