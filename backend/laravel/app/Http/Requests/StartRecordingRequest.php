@@ -15,7 +15,11 @@ class StartRecordingRequest extends FormRequest
     {
         return [
             'device_id' => ['required', 'integer', 'exists:devices,id'],
-            'preset' => ['required', 'string', 'in:LOW,MEDIUM,HIGH,LOSSLESS'],
+            // LOSSLESS is intentionally excluded here: the enum/config-ladder
+            // model it as FLAC, but the Android agent's recorder only
+            // implements the AAC path today, so accepting it would silently
+            // fall back to AAC rather than actually recording lossless.
+            'preset' => ['required', 'string', 'in:LOW,MEDIUM,HIGH'],
         ];
     }
 }

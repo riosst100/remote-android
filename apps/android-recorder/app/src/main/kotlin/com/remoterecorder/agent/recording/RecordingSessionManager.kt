@@ -95,8 +95,22 @@ class RecordingSessionManager(
         }
 
         state = State.STOPPING
-        recorder?.stop()
+
+        // The final chunk (which may be the *only* chunk, if the recording
+        // was shorter than one chunk_target_seconds interval) is uploaded
+        // synchronously here rather than just handed to WorkManager: /complete
+        // is about to be called immediately after, and finalization fails if
+        // no chunk has actually landed on the server yet. WorkManager still
+        // owns retry for this same upload if it fails here (see
+        // ChunkUploadWorker.enqueue's dedupe key), so a flaky network at stop
+        // time doesn't lose the chunk — it just means /complete won't succeed
+        // until that retry lands, which the dashboard can then re-trigger.
+        val finalChunk = recorder?.stop()
         recorder = null
+
+        if (finalChunk != null) {
+            uploadChunkNow(activeRecordingId ?: command.recordingId, finalChunk)
+        }
 
         val recordingId = activeRecordingId
         acknowledge(command.commandId, "recording_stopped")
@@ -122,6 +136,28 @@ class RecordingSessionManager(
             durationSeconds = chunk.durationSeconds,
             mimeType = chunk.mimeType,
         )
+    }
+
+    private fun uploadChunkNow(recordingId: String, chunk: ChunkingAudioRecorder.ChunkFile) {
+        runCatching {
+            apiClient.uploadChunk(recordingId, chunk.chunkNumber, chunk.checksum, chunk.durationSeconds, chunk.file, chunk.mimeType)
+            AgentLog.i("session", "Final chunk #${chunk.chunkNumber} uploaded synchronously before completion request.")
+            ChunkFileStore.delete(chunk.file)
+        }.onFailure { error ->
+            AgentLog.w("session", "Synchronous upload of final chunk #${chunk.chunkNumber} failed; falling back to WorkManager retry.", error)
+            // Still hand it to WorkManager so the chunk isn't lost — /complete
+            // will fail this time, but the dashboard can retry it once this
+            // background upload eventually succeeds.
+            ChunkUploadWorker.enqueue(
+                context = context,
+                recordingId = recordingId,
+                chunkNumber = chunk.chunkNumber,
+                file = chunk.file,
+                checksum = chunk.checksum,
+                durationSeconds = chunk.durationSeconds,
+                mimeType = chunk.mimeType,
+            )
+        }
     }
 
     private fun onRecordingError(command: Command, error: Throwable) {

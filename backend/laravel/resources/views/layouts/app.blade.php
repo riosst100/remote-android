@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="reverb-port" content="{{ config('reverb.apps.apps.0.options.port', 8080) }}">
+    <meta name="reverb-scheme" content="{{ config('reverb.apps.apps.0.options.scheme', 'http') }}">
+    <meta name="reverb-key" content="{{ config('reverb.apps.apps.0.key') }}">
     <title>@yield('title', 'Dashboard') &middot; Remote Recorder</title>
     <style>
         :root {
@@ -69,6 +72,9 @@
     @yield('content')
 </main>
 <div id="toast" class="toast"></div>
+@auth
+<script src="https://cdn.jsdelivr.net/npm/pusher-js@8.4.0/dist/web/pusher.min.js"></script>
+@endauth
 <script>
     window.showToast = function (message, isError) {
         const el = document.getElementById('toast');
@@ -98,6 +104,38 @@
         }
         return body;
     };
+
+    @auth
+    /**
+     * Thin realtime layer over pusher-js talking directly to Reverb
+     * (Pusher-protocol compatible), rather than pulling in the full
+     * laravel-echo package — Echo's API surface beyond subscribe/bind
+     * isn't needed here and this avoids requiring a JS build step for a
+     * server-rendered dashboard. The host is read from the page's own
+     * location rather than a fixed .env value so this works identically
+     * whether the dashboard is opened via 127.0.0.1 or a LAN IP.
+     */
+    window.realtimeReady = new Promise((resolve) => {
+        const pusher = new Pusher(document.querySelector('meta[name="reverb-key"]').content, {
+            wsHost: window.location.hostname,
+            wsPort: Number(document.querySelector('meta[name="reverb-port"]').content),
+            wssPort: Number(document.querySelector('meta[name="reverb-port"]').content),
+            forceTLS: document.querySelector('meta[name="reverb-scheme"]').content === 'https',
+            enabledTransports: ['ws', 'wss'],
+            disableStats: true,
+            authorizer: (channel) => ({
+                authorize: (socketId, callback) => {
+                    window.apiFetch('/api/broadcasting/auth', {
+                        method: 'POST',
+                        body: JSON.stringify({ socket_id: socketId, channel_name: channel.name }),
+                    }).then((data) => callback(false, data)).catch((err) => callback(true, err));
+                },
+            }),
+        });
+
+        pusher.connection.bind('connected', () => resolve(pusher));
+    });
+    @endauth
 </script>
 @stack('scripts')
 </body>

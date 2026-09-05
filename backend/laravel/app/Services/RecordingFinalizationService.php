@@ -153,12 +153,21 @@ class RecordingFinalizationService
         }
     }
 
+    /**
+     * Maps a chunk's detected MIME type to a file extension. Matched by
+     * substring rather than exact equality because different Android
+     * OEM fileinfo/magic-byte detectors report AAC-ADTS under a variety of
+     * vendor-specific strings (e.g. Samsung devices report
+     * "audio/x-hx-aac-adts" rather than the more common "audio/aac").
+     */
     private function extensionFor(string $mimeType): string
     {
-        return match ($mimeType) {
-            'audio/aac', 'audio/aac-adts' => 'aac',
-            'audio/opus', 'audio/ogg' => 'ogg',
-            'audio/flac' => 'flac',
+        $mimeType = strtolower($mimeType);
+
+        return match (true) {
+            str_contains($mimeType, 'aac') => 'aac',
+            str_contains($mimeType, 'opus'), str_contains($mimeType, 'ogg') => 'ogg',
+            str_contains($mimeType, 'flac') => 'flac',
             default => 'audio',
         };
     }

@@ -33,7 +33,13 @@ class RecordingStartRequested implements ShouldBroadcast
             'command_id' => $this->command->command_id,
             'command' => $this->command->command->value,
             'recording_id' => $this->recordingUuid,
+            // "device_id" here is the device's UUID, per the START_RECORDING
+            // command contract the Android agent expects. The dashboard
+            // instead needs the numeric device row id to match its DOM, so
+            // that's exposed separately rather than overloading device_id
+            // with two different meanings for two different consumers.
             'device_id' => $this->command->device->device_uuid,
+            'admin_device_id' => $this->deviceId,
             'configuration' => $this->command->payload,
             'timestamp' => $this->command->created_at->toIso8601String(),
         ];

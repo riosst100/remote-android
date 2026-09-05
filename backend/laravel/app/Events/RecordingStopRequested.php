@@ -33,7 +33,11 @@ class RecordingStopRequested implements ShouldBroadcast
             'command_id' => $this->command->command_id,
             'command' => $this->command->command->value,
             'recording_id' => $this->recordingUuid,
+            // See RecordingStartRequested::broadcastWith for why device_id
+            // (UUID, for the Android command contract) and admin_device_id
+            // (numeric row id, for the dashboard) are both present.
             'device_id' => $this->command->device->device_uuid,
+            'admin_device_id' => $this->deviceId,
             'timestamp' => $this->command->created_at->toIso8601String(),
         ];
     }

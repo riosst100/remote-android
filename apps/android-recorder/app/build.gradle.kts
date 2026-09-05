@@ -17,7 +17,7 @@ android {
         // 10.24.182.78 = this dev machine's LAN IP, reachable from a
         // physical device on the same Wi-Fi. Emulators would instead use
         // 10.0.2.2 (the emulator's alias for the host's localhost).
-        buildConfigField("String", "API_BASE_URL", "\"http://10.24.182.78:8000\"")
+        buildConfigField("String", "API_BASE_URL", "\"http://10.24.182.78:8002\"")
         buildConfigField("String", "WS_HOST", "\"10.24.182.78\"")
         buildConfigField("int", "WS_PORT", "8080")
         buildConfigField("boolean", "WS_TLS", "false")

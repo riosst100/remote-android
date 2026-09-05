@@ -4,20 +4,18 @@
 
 @section('content')
 <p><a href="{{ route('recordings.index') }}">&larr; Recordings</a></p>
-<h2 style="margin-top:0;">Recording <code>{{ $recording->uuid }}</code></h2>
+<h2 style="margin-top:0;">Recording <code>{{ $recording->uuid }}</code> <span id="realtime-indicator" class="muted" style="font-size:12px;font-weight:400;"></span></h2>
 
-@if ($recording->error_message)
-<div class="card" style="border-color:var(--danger);margin-bottom:16px;">
-    <strong style="color:var(--danger);">Error:</strong> {{ $recording->error_message }}
+<div id="error-banner" @if (! $recording->error_message) hidden @endif class="card" style="border-color:var(--danger);margin-bottom:16px;">
+    <strong style="color:var(--danger);">Error:</strong> <span id="error-message">{{ $recording->error_message }}</span>
 </div>
-@endif
 
 <div class="grid cols-2" style="margin-bottom:24px;">
     <div class="card">
         <h3 style="margin-top:0;">Overview</h3>
         <table>
             <tr><th>Device</th><td><a href="{{ route('devices.show', $recording->device) }}">{{ $recording->device->name ?? $recording->device->device_uuid }}</a></td></tr>
-            <tr><th>Status</th><td><span class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td></tr>
+            <tr><th>Status</th><td><span id="recording-status" class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td></tr>
             <tr><th>Started</th><td>{{ optional($recording->started_at)->toDayDateTimeString() ?? '—' }}</td></tr>
             <tr><th>Stopped</th><td>{{ optional($recording->stopped_at)->toDayDateTimeString() ?? '—' }}</td></tr>
             <tr><th>Duration</th><td>{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td></tr>
@@ -68,3 +66,44 @@
     </table>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+window.realtimeReady?.then((pusher) => {
+    const channel = pusher.subscribe('private-recordings.{{ $recording->uuid }}');
+
+    const setStatus = (status) => {
+        const badge = document.getElementById('recording-status');
+        badge.textContent = status;
+        badge.className = `badge ${status}`;
+    };
+
+    const showError = (message) => {
+        if (!message) return;
+        document.getElementById('error-message').textContent = message;
+        document.getElementById('error-banner').hidden = false;
+    };
+
+    channel.bind('RecordingStatusChanged', (data) => {
+        setStatus(data.status);
+        showError(data.error_message);
+    });
+    channel.bind('RecordingStarted', (data) => setStatus(data.status));
+    channel.bind('RecordingStopped', (data) => setStatus(data.status));
+    channel.bind('ChunkUploaded', () => {
+        // A new chunk landed — reload to show it in the chunk table below.
+        // (Kept as a full reload rather than a DOM patch: chunk rows carry
+        // several fields and this page is a detail view someone dwells on,
+        // not a list glanced at repeatedly, so the trade-off favors simplicity.)
+        location.reload();
+    });
+    channel.bind('RecordingCompleted', () => location.reload());
+    channel.bind('RecordingFailed', (data) => {
+        setStatus('FAILED');
+        showError(data.error_message);
+    });
+
+    document.getElementById('realtime-indicator').textContent = '● live';
+});
+</script>
+@endpush

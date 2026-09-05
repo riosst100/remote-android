@@ -45,11 +45,16 @@ class ChunkingAudioRecorder(
         startNextChunk()
     }
 
-    fun stop() {
-        if (!isRecording) return
+    /**
+     * Stops recording and returns the final chunk (if any audio was
+     * actually captured), so the caller can make sure it's uploaded before
+     * requesting finalization — see RecordingSessionManager.handleStop.
+     */
+    fun stop(): ChunkFile? {
+        if (!isRecording) return null
         isRecording = false
         rotationJob?.cancel()
-        finishCurrentChunk()
+        return finishCurrentChunk()
     }
 
     private fun startNextChunk() {
