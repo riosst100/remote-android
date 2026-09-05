@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Device Service</string>
+    <string name="notification_channel_recording_name">Recording Service</string>
+    <string name="notification_channel_recording_description">Shows when the microphone recording service is active</string>
+    <string name="notification_channel_status_name">Agent Status</string>
+    <string name="notification_channel_status_description">Background connectivity and registration status</string>
+    <string name="notification_recording_title">Device Service</string>
+    <string name="notification_recording_text">Recording service is active</string>
+    <string name="setup_title">Device Service Setup</string>
+    <string name="setup_grant_mic_permission">Grant Microphone Permission</string>
+    <string name="setup_register_device">Register This Device</string>
+    <string name="setup_status_unregistered">Not registered</string>
+    <string name="setup_battery_optimization">Disable Battery Optimization</string>
+</resources>

@@ -1,0 +1,41 @@
+# --- Laravel backend ---
+backend/laravel/vendor/
+backend/laravel/node_modules/
+backend/laravel/.env
+backend/laravel/.env.backup
+backend/laravel/.phpunit.cache/
+backend/laravel/storage/*.key
+backend/laravel/storage/app/private/*
+!backend/laravel/storage/app/private/.gitkeep
+backend/laravel/storage/framework/cache/data/*
+backend/laravel/storage/framework/sessions/*
+backend/laravel/storage/framework/testing/*
+backend/laravel/storage/framework/views/*
+backend/laravel/storage/logs/*
+!backend/laravel/storage/framework/cache/data/.gitkeep
+!backend/laravel/storage/framework/sessions/.gitkeep
+!backend/laravel/storage/framework/testing/.gitkeep
+!backend/laravel/storage/framework/views/.gitkeep
+!backend/laravel/storage/logs/.gitkeep
+backend/laravel/database/database.sqlite
+backend/laravel/public/hot
+backend/laravel/public/storage
+backend/laravel/bootstrap/cache/*.php
+!backend/laravel/bootstrap/cache/.gitkeep
+
+# --- Android agent ---
+apps/android-recorder/.gradle/
+apps/android-recorder/build/
+apps/android-recorder/app/build/
+apps/android-recorder/local.properties
+apps/android-recorder/.idea/
+apps/android-recorder/*.iml
+apps/android-recorder/app/*.iml
+apps/android-recorder/captures/
+apps/android-recorder/.cxx/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

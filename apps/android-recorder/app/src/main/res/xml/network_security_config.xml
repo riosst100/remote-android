@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Cleartext (ws://, http://) is only permitted to the local emulator
+         host used during development. Production builds must serve the
+         API and Reverb over TLS (wss://, https://) — see BuildConfig
+         WS_TLS/API_BASE_URL in the release build type. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- Dev machine LAN IP, for testing on a physical device over Wi-Fi. -->
+        <domain includeSubdomains="false">10.24.182.78</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
