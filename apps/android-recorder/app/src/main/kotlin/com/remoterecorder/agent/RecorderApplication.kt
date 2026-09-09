@@ -4,6 +4,8 @@ import android.app.Application
 import com.remoterecorder.agent.recording.RecordingForegroundService
 import com.remoterecorder.agent.util.DeviceCredentialStore
 import com.remoterecorder.agent.work.HeartbeatWorker
+import com.remoterecorder.agent.work.PendingRecordingSyncWorker
+import com.remoterecorder.agent.work.ScheduleSyncWorker
 
 class RecorderApplication : Application() {
 
@@ -18,6 +20,8 @@ class RecorderApplication : Application() {
         if (credentials.isRegistered()) {
             RecordingForegroundService.ensureRunning(this)
             HeartbeatWorker.schedule(this)
+            ScheduleSyncWorker.schedule(this)
+            PendingRecordingSyncWorker.schedule(this)
         }
     }
 }

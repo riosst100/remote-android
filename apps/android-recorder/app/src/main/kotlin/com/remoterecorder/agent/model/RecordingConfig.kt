@@ -36,5 +36,20 @@ data class RecordingConfig(
                 channels = payload.optInt("channels", 1),
             )
         }
+
+        /**
+         * Maps a schedule's LOW/MEDIUM/HIGH preset to a starting-point
+         * config, matching rungs from [com.remoterecorder.agent.recording.CapabilityFallback]'s
+         * own ladder philosophy. This is only ever a *proposal* — the caller
+         * (RecordingSessionManager.startFromSchedule) passes the result
+         * through `CapabilityFallback.resolve(...)` exactly as the
+         * WebSocket-triggered `handleStart` path already does, so this
+         * function doesn't need to itself validate hardware support.
+         */
+        fun fromPreset(preset: String): RecordingConfig = when (preset.uppercase()) {
+            "HIGH" -> RecordingConfig(AudioEncoder.AAC, 48000, 256_000, 1)
+            "LOW" -> RecordingConfig(AudioEncoder.AAC, 22050, 64_000, 1)
+            else -> RecordingConfig(AudioEncoder.AAC, 44100, 128_000, 1) // MEDIUM and any unrecognized value
+        }
     }
 }

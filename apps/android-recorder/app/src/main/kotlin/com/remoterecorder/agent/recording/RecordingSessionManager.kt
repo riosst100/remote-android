@@ -6,12 +6,16 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import com.remoterecorder.agent.model.Command
 import com.remoterecorder.agent.model.CommandType
+import com.remoterecorder.agent.model.DeviceSchedule
 import com.remoterecorder.agent.model.ErrorCode
 import com.remoterecorder.agent.model.RecordingConfig
 import com.remoterecorder.agent.network.ApiClient
 import com.remoterecorder.agent.util.AgentLog
+import com.remoterecorder.agent.util.PendingRecordingStore
 import com.remoterecorder.agent.work.ChunkUploadWorker
 import org.json.JSONObject
+import java.time.Instant
+import java.util.UUID
 
 /**
  * Owns the state machine for "is there an active recording, and what is
@@ -25,10 +29,12 @@ class RecordingSessionManager(
     private val apiClient: ApiClient,
 ) {
     enum class State { IDLE, RECORDING, STOPPING }
+    enum class Source { NONE, ADMIN, SCHEDULE_DEVICE }
 
     private var recorder: ChunkingAudioRecorder? = null
     private var activeRecordingId: String? = null
     private var activeCommandId: String? = null
+    private var activeSource: Source = Source.NONE
 
     @Volatile var state: State = State.IDLE
         private set
@@ -40,6 +46,116 @@ class RecordingSessionManager(
         }
     }
 
+    /**
+     * Locally-triggered start (from a fired schedule alarm), independent of
+     * any server-pushed command. Skips command-ack semantics entirely —
+     * there is no DeviceCommand row to ack against. Registers with the
+     * server immediately if online; if that call fails, recording proceeds
+     * anyway and registration is retried later by PendingRecordingSyncWorker
+     * — audio capture is never gated on network reachability, matching the
+     * existing STOP/chunk-upload philosophy.
+     *
+     * Returns the locally-generated recording id so the caller
+     * (ScheduleAlarmReceiver) can arm the matching stop alarm.
+     *
+     * `@Synchronized` alongside handleStart/handleStop/stopFromSchedule:
+     * cheap insurance against the admin-WebSocket-start and schedule-alarm
+     * paths racing to mutate `state`/`recorder` at the same instant.
+     */
+    @Synchronized
+    fun startFromSchedule(schedule: DeviceSchedule): String? {
+        if (state != State.IDLE) {
+            AgentLog.w("session", "Schedule fired while already $state; skipping (WebSocket admin-start or another schedule already active).")
+            return null
+        }
+        if (!hasMicPermission()) {
+            AgentLog.e("session", "Cannot start scheduled recording: RECORD_AUDIO not granted.")
+            return null
+        }
+
+        val localRecordingId = UUID.randomUUID().toString()
+        val startedAt = Instant.now()
+        val resolved = CapabilityFallback.resolve(RecordingConfig.fromPreset(schedule.preset))
+        val chunkTargetSeconds = 20
+
+        val newRecorder = ChunkingAudioRecorder(
+            context = context,
+            config = resolved,
+            chunkTargetSeconds = chunkTargetSeconds,
+            onChunkReady = { chunk -> onChunkReady(localRecordingId, chunk) },
+            onError = { onScheduledRecordingError(localRecordingId, it) },
+        )
+
+        activeRecordingId = localRecordingId
+        activeCommandId = null // no server command backs this
+        activeSource = Source.SCHEDULE_DEVICE
+        state = State.RECORDING
+        recorder = newRecorder
+        newRecorder.start()
+
+        PendingRecordingStore(context).markStarted(localRecordingId, schedule, startedAt, resolved)
+        tryRegisterNow(localRecordingId, schedule, startedAt, resolved)
+
+        return localRecordingId
+    }
+
+    /**
+     * Locally-triggered stop, matching [startFromSchedule]. Reuses the
+     * existing `/complete` finalize call directly (it's agnostic to
+     * origin) rather than routing through `acknowledge()`, since there is
+     * no command to ack.
+     */
+    @Synchronized
+    fun stopFromSchedule(recordingId: String) {
+        if (state == State.IDLE || activeRecordingId != recordingId) {
+            AgentLog.w("session", "Scheduled stop for $recordingId does not match active state; ignoring.")
+            return
+        }
+
+        state = State.STOPPING
+        val finalChunk = recorder?.stop()
+        recorder = null
+        if (finalChunk != null) uploadChunkNow(recordingId, finalChunk)
+
+        val store = PendingRecordingStore(context)
+        store.markFinishedRecording(recordingId)
+        runCatching { apiClient.completeRecording(recordingId) }
+            .onSuccess { store.markCompleted(recordingId) }
+            .onFailure { AgentLog.w("session", "Complete request failed for $recordingId; PendingRecordingSyncWorker will retry.", it) }
+
+        state = State.IDLE
+        activeRecordingId = null
+        activeSource = Source.NONE
+    }
+
+    private fun tryRegisterNow(localRecordingId: String, schedule: DeviceSchedule, startedAt: Instant, config: RecordingConfig) {
+        runCatching {
+            apiClient.createRecording(
+                clientRecordingId = localRecordingId,
+                preset = schedule.preset,
+                startedAt = startedAt.toString(),
+                encoder = config.encoder.name.lowercase(),
+                sampleRate = config.sampleRate,
+                bitrate = config.bitrate,
+                channels = config.channels,
+                scheduleId = schedule.id,
+            )
+        }.onSuccess {
+            PendingRecordingStore(context).markRegistered(localRecordingId)
+        }.onFailure {
+            AgentLog.w("session", "Immediate registration failed for $localRecordingId; PendingRecordingSyncWorker will retry.", it)
+        }
+    }
+
+    private fun onScheduledRecordingError(recordingId: String, error: Throwable) {
+        AgentLog.e("session", "Scheduled recording error for $recordingId", error)
+        state = State.IDLE
+        recorder = null
+        activeRecordingId = null
+        activeSource = Source.NONE
+    }
+
+    @Synchronized
     private fun handleStart(command: Command) {
         acknowledge(command.commandId, "command_received")
 
@@ -74,6 +190,7 @@ class RecordingSessionManager(
 
         activeRecordingId = command.recordingId
         activeCommandId = command.commandId
+        activeSource = Source.ADMIN
         state = State.RECORDING
         recorder = newRecorder
         newRecorder.start()
@@ -81,6 +198,7 @@ class RecordingSessionManager(
         acknowledgeStarted(command.commandId, resolved)
     }
 
+    @Synchronized
     private fun handleStop(command: Command) {
         acknowledge(command.commandId, "command_received")
 
@@ -123,6 +241,7 @@ class RecordingSessionManager(
         state = State.IDLE
         activeRecordingId = null
         activeCommandId = null
+        activeSource = Source.NONE
     }
 
     private fun onChunkReady(recordingId: String, chunk: ChunkingAudioRecorder.ChunkFile) {
@@ -169,6 +288,7 @@ class RecordingSessionManager(
         recorder = null
         activeRecordingId = null
         activeCommandId = null
+        activeSource = Source.NONE
     }
 
     private fun acknowledgeStarted(commandId: String, config: RecordingConfig? = null) {

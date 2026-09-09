@@ -40,6 +40,13 @@
         android:id="@+id/batteryButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/setup_battery_optimization" />
+        android:text="@string/setup_battery_optimization"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/exactAlarmButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/setup_exact_alarm_permission" />
 
 </LinearLayout>

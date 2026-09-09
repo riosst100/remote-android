@@ -11,4 +11,5 @@
     <string name="setup_register_device">Register This Device</string>
     <string name="setup_status_unregistered">Not registered</string>
     <string name="setup_battery_optimization">Disable Battery Optimization</string>
+    <string name="setup_exact_alarm_permission">Allow Exact Alarm Scheduling</string>
 </resources>

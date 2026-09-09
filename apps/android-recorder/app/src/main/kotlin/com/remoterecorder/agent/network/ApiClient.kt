@@ -112,6 +112,39 @@ class ApiClient(private val tokenProvider: () -> String?) {
         return executeJson(request, authenticated = true)
     }
 
+    fun fetchSchedules(): JSONObject {
+        val request = authedRequestBuilder("/api/devices/schedules").get().build()
+        return executeJson(request, authenticated = true)
+    }
+
+    fun createRecording(
+        clientRecordingId: String,
+        preset: String,
+        startedAt: String,
+        encoder: String? = null,
+        sampleRate: Int? = null,
+        bitrate: Int? = null,
+        channels: Int? = null,
+        scheduleId: Long? = null,
+    ): JSONObject {
+        val body = JSONObject().apply {
+            put("client_recording_id", clientRecordingId)
+            put("preset", preset)
+            put("started_at", startedAt)
+            encoder?.let { put("encoder", it) }
+            sampleRate?.let { put("sample_rate", it) }
+            bitrate?.let { put("bitrate", it) }
+            channels?.let { put("channels", it) }
+            scheduleId?.let { put("schedule_id", it) }
+        }
+
+        val request = authedRequestBuilder("/api/devices/recordings")
+            .post(body.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        return executeJson(request, authenticated = true)
+    }
+
     private fun authedRequestBuilder(path: String): Request.Builder {
         val token = tokenProvider() ?: throw ApiException("NOT_REGISTERED", "Device has no API token yet.")
         return Request.Builder()

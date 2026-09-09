@@ -23,6 +23,15 @@
          user's decision. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Device-authoritative recording schedule (see ScheduleAlarmScheduler):
+         SCHEDULE_EXACT_ALARM is the runtime-revocable permission this
+         general-purpose app requests explicitly (SetupActivity); it does
+         not qualify for the "core app function" auto-grant categories that
+         USE_EXACT_ALARM covers on API 33+, so both are declared and the
+         request/fallback-poll path is treated as the primary path. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
     <application
         android:name=".RecorderApplication"
         android:allowBackup="false"
@@ -61,6 +70,10 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".boot.ScheduleAlarmReceiver"
+            android:exported="false" />
 
     </application>
 

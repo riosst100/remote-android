@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.remoterecorder.agent.R
 import com.remoterecorder.agent.model.Command
+import com.remoterecorder.agent.model.DeviceSchedule
 import com.remoterecorder.agent.network.ApiClient
 import com.remoterecorder.agent.network.ConnectionStatus
 import com.remoterecorder.agent.network.ReverbSocketClient
@@ -23,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /**
  * The one long-lived component of the agent. Runs as a foreground service
@@ -63,6 +65,11 @@ class RecordingForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundWithNotification(recording = false)
 
+        when (intent?.action) {
+            ACTION_SCHEDULE_START -> handleScheduleStart(intent)
+            ACTION_SCHEDULE_STOP -> handleScheduleStop(intent)
+        }
+
         val serverDeviceId = credentials.serverDeviceId
         if (serverDeviceId <= 0) {
             AgentLog.e("service", "Device is not registered yet (no server device id); cannot subscribe for commands.")
@@ -73,6 +80,39 @@ class RecordingForegroundService : Service() {
         startHeartbeatLoop()
 
         return START_STICKY
+    }
+
+    /**
+     * Handles an alarm-fired (or fallback-poll-fired) schedule start.
+     * Called from `onStartCommand`, which runs with a short time budget
+     * when invoked via `ScheduleAlarmReceiver` — this hands off to the
+     * already-cheap `RecordingSessionManager.startFromSchedule` rather than
+     * doing any blocking network work itself.
+     */
+    private fun handleScheduleStart(intent: Intent) {
+        val scheduleJson = intent.getStringExtra(EXTRA_SCHEDULE_JSON)
+        val schedule = scheduleJson?.let { runCatching { DeviceSchedule.fromJson(JSONObject(it)) }.getOrNull() }
+        if (schedule == null) {
+            AgentLog.e("service", "ACTION_SCHEDULE_START with missing/malformed schedule payload; ignoring.")
+            return
+        }
+
+        val recordingId = sessionManager.startFromSchedule(schedule)
+        if (recordingId != null) {
+            val stopAt = System.currentTimeMillis() + schedule.durationMinutes * 60_000L
+            ScheduleAlarmScheduler.armStopAlarm(this, recordingId, stopAt)
+        }
+        updateNotification(recording = sessionManager.isRecording())
+    }
+
+    private fun handleScheduleStop(intent: Intent) {
+        val recordingId = intent.getStringExtra(EXTRA_RECORDING_ID)
+        if (recordingId == null) {
+            AgentLog.e("service", "ACTION_SCHEDULE_STOP with no recording id; ignoring.")
+            return
+        }
+        sessionManager.stopFromSchedule(recordingId)
+        updateNotification(recording = sessionManager.isRecording())
     }
 
     override fun onDestroy() {
@@ -168,9 +208,30 @@ class RecordingForegroundService : Service() {
         private const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID_RECORDING = "recording_service"
 
+        const val ACTION_SCHEDULE_START = "com.remoterecorder.agent.action.SCHEDULE_START"
+        const val ACTION_SCHEDULE_STOP = "com.remoterecorder.agent.action.SCHEDULE_STOP"
+        private const val EXTRA_SCHEDULE_JSON = "schedule_json"
+        private const val EXTRA_RECORDING_ID = "recording_id"
+
         /** Starts the service if it isn't already running. Never triggers recording by itself. */
         fun ensureRunning(context: Context) {
             val intent = Intent(context, RecordingForegroundService::class.java)
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** Entry point for a fired schedule-start alarm (or fallback poll). */
+        fun startFromSchedule(context: Context, schedule: DeviceSchedule) {
+            val intent = Intent(context, RecordingForegroundService::class.java)
+                .setAction(ACTION_SCHEDULE_START)
+                .putExtra(EXTRA_SCHEDULE_JSON, schedule.toJson().toString())
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** Entry point for a fired schedule-stop alarm. */
+        fun stopFromSchedule(context: Context, recordingId: String) {
+            val intent = Intent(context, RecordingForegroundService::class.java)
+                .setAction(ACTION_SCHEDULE_STOP)
+                .putExtra(EXTRA_RECORDING_ID, recordingId)
             ContextCompat.startForegroundService(context, intent)
         }
     }

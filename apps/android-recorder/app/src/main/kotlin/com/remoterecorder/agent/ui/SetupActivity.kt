@@ -2,6 +2,7 @@ package com.remoterecorder.agent.ui
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -20,6 +21,8 @@ import com.remoterecorder.agent.network.DeviceRegistrationManager
 import com.remoterecorder.agent.recording.RecordingForegroundService
 import com.remoterecorder.agent.util.DeviceCredentialStore
 import com.remoterecorder.agent.work.HeartbeatWorker
+import com.remoterecorder.agent.work.PendingRecordingSyncWorker
+import com.remoterecorder.agent.work.ScheduleSyncWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,6 +65,10 @@ class SetupActivity : AppCompatActivity() {
             requestBatteryOptimizationExemption()
         }
 
+        findViewById<Button>(R.id.exactAlarmButton).setOnClickListener {
+            requestExactAlarmPermission()
+        }
+
         refreshStatus()
     }
 
@@ -96,13 +103,16 @@ class SetupActivity : AppCompatActivity() {
         if (hasMicPermission() && credentials.isRegistered()) {
             RecordingForegroundService.ensureRunning(this)
             HeartbeatWorker.schedule(this)
+            ScheduleSyncWorker.schedule(this)
+            PendingRecordingSyncWorker.schedule(this)
         }
     }
 
     private fun refreshStatus() {
         val micStatus = if (hasMicPermission()) "granted" else "NOT granted"
         val regStatus = if (credentials.isRegistered()) "registered (device id ${credentials.serverDeviceId})" else "not registered"
-        statusText.text = "Microphone permission: $micStatus\nServer registration: $regStatus"
+        val alarmStatus = if (canScheduleExactAlarms()) "granted" else "NOT granted"
+        statusText.text = "Microphone permission: $micStatus\nServer registration: $regStatus\nExact alarm scheduling: $alarmStatus"
     }
 
     private fun hasMicPermission(): Boolean {
@@ -119,6 +129,31 @@ class SetupActivity : AppCompatActivity() {
         // This opens a system dialog the user must approve — we never
         // silently disable battery optimization ourselves.
         val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivity(intent)
+    }
+
+    private fun canScheduleExactAlarms(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true // pre-Android 12: no such restriction
+        val alarmManager = getSystemService(AlarmManager::class.java)
+        return alarmManager.canScheduleExactAlarms()
+    }
+
+    private fun requestExactAlarmPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            statusText.text = "Exact alarm scheduling not restricted on this Android version."
+            return
+        }
+        if (canScheduleExactAlarms()) {
+            statusText.text = "Exact alarm scheduling already granted."
+            return
+        }
+
+        // Opens system settings; the user must approve — we never bypass
+        // this. If left denied, ScheduleAlarmScheduler falls back to
+        // ScheduleFallbackPollWorker automatically.
+        val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
             data = Uri.parse("package:$packageName")
         }
         startActivity(intent)
