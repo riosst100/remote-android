@@ -136,7 +136,61 @@ class RecordingScheduleTest extends TestCase
         $this->assertSame(0, Recording::query()->count());
 
         $schedule = RecordingSchedule::query()->first();
-        $this->assertNotNull($schedule->last_run_at, 'last_run_at should still be marked so we do not retry every minute for an offline device.');
+        $this->assertNull($schedule->last_run_at, 'last_run_at should stay null since the recording never actually started.');
+        $this->assertNotNull($schedule->last_attempt_at, 'last_attempt_at should be marked so we know when the retry window started.');
+
+        Carbon::setTestNow();
+    }
+
+    public function test_a_schedule_retries_within_the_window_once_the_device_comes_back_online(): void
+    {
+        // The device reboots right as its schedule comes due, then
+        // reconnects a few minutes later — this must still start.
+        Carbon::setTestNow(Carbon::parse('2026-01-09 03:30:00', 'Asia/Jakarta'));
+
+        $device = Device::factory()->create(['status' => DeviceStatus::OFFLINE]);
+        RecordingSchedule::factory()->create([
+            'device_id' => $device->id,
+            'day_of_week' => 5,
+            'time_of_day' => '03:30:00',
+        ]);
+
+        $service = app(RecordingScheduleService::class);
+        $this->assertSame(0, $service->runDue());
+
+        Carbon::setTestNow(Carbon::parse('2026-01-09 03:34:00', 'Asia/Jakarta'));
+        $device->forceFill(['status' => DeviceStatus::ONLINE])->save();
+
+        $started = $service->runDue();
+
+        $this->assertSame(1, $started);
+        $this->assertSame(1, Recording::query()->where('device_id', $device->id)->count());
+
+        Carbon::setTestNow();
+    }
+
+    public function test_a_schedule_stops_retrying_once_the_window_lapses(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-01-09 03:30:00', 'Asia/Jakarta'));
+
+        $device = Device::factory()->create(['status' => DeviceStatus::OFFLINE]);
+        RecordingSchedule::factory()->create([
+            'device_id' => $device->id,
+            'day_of_week' => 5,
+            'time_of_day' => '03:30:00',
+        ]);
+
+        $service = app(RecordingScheduleService::class);
+        $this->assertSame(0, $service->runDue());
+
+        // Comes back online after the retry window has lapsed.
+        Carbon::setTestNow(Carbon::parse('2026-01-09 04:01:00', 'Asia/Jakarta'));
+        $device->forceFill(['status' => DeviceStatus::ONLINE])->save();
+
+        $started = $service->runDue();
+
+        $this->assertSame(0, $started, 'A device coming back online after the retry window should not retroactively start.');
+        $this->assertSame(0, Recording::query()->count());
 
         Carbon::setTestNow();
     }

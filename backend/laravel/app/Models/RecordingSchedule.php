@@ -20,6 +20,7 @@ class RecordingSchedule extends Model
         'duration_minutes',
         'is_active',
         'last_run_at',
+        'last_attempt_at',
     ];
 
     protected function casts(): array
@@ -28,6 +29,7 @@ class RecordingSchedule extends Model
             'preset' => RecordingPreset::class,
             'is_active' => 'boolean',
             'last_run_at' => 'datetime',
+            'last_attempt_at' => 'datetime',
         ];
     }
 
