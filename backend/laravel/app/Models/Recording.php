@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\RecordingPreset;
+use App\Enums\RecordingSource;
 use App\Enums\RecordingStatus;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -19,6 +20,7 @@ class Recording extends Model
         'device_id',
         'status',
         'preset',
+        'source',
         'encoder',
         'sample_rate',
         'bitrate',
@@ -37,6 +39,7 @@ class Recording extends Model
         return [
             'status' => RecordingStatus::class,
             'preset' => RecordingPreset::class,
+            'source' => RecordingSource::class,
             'started_at' => 'datetime',
             'stopped_at' => 'datetime',
         ];

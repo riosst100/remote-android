@@ -67,7 +67,7 @@
     <p class="muted">Times are Asia/Jakarta (WIB / UTC+7). Each schedule starts a recording at the given day and time every week and stops it automatically after the set duration.</p>
 
     <table style="margin-bottom:16px;">
-        <thead><tr><th>Day</th><th>Time</th><th>Preset</th><th>Duration</th><th>Status</th><th>Last Ran</th><th></th></tr></thead>
+        <thead><tr><th>Day</th><th>Time</th><th>Preset</th><th>Duration</th><th>Status</th><th></th></tr></thead>
         <tbody>
         @forelse ($device->schedules as $schedule)
             <tr>
@@ -83,7 +83,6 @@
                         </button>
                     </form>
                 </td>
-                <td class="muted">{{ optional($schedule->last_run_at)->diffForHumans() ?? 'never' }}</td>
                 <td>
                     <form method="POST" action="{{ route('devices.schedules.destroy', [$device, $schedule]) }}" style="display:inline;" onsubmit="return confirm('Remove this schedule?');">
                         @csrf
@@ -93,7 +92,7 @@
                 </td>
             </tr>
         @empty
-            <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
+            <tr><td colspan="6" class="muted">No schedules yet.</td></tr>
         @endforelse
         </tbody>
     </table>
@@ -140,19 +139,20 @@
 <div class="card">
     <h3 style="margin-top:0;">Recording History</h3>
     <table>
-        <thead><tr><th>Recording</th><th>Status</th><th>Preset</th><th>Started</th><th>Duration</th><th></th></tr></thead>
+        <thead><tr><th>Recording</th><th>Status</th><th>Source</th><th>Preset</th><th>Started</th><th>Duration</th><th></th></tr></thead>
         <tbody>
         @forelse ($device->recordings as $recording)
             <tr>
                 <td><code>{{ substr($recording->uuid, 0, 8) }}</code></td>
                 <td><span class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td>
+                <td>{{ $recording->source->value }}</td>
                 <td>{{ $recording->preset->value }}</td>
                 <td class="muted">{{ optional($recording->started_at)->diffForHumans() ?? '—' }}</td>
                 <td>{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td>
                 <td><a href="{{ route('recordings.show', $recording) }}">View</a></td>
             </tr>
         @empty
-            <tr><td colspan="6" class="muted">No recordings for this device yet.</td></tr>
+            <tr><td colspan="7" class="muted">No recordings for this device yet.</td></tr>
         @endforelse
         </tbody>
     </table>

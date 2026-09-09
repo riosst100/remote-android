@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\DeviceCommandController;
 use App\Http\Controllers\Api\DeviceController;
 use App\Http\Controllers\Api\DeviceErrorController;
+use App\Http\Controllers\Api\DeviceRecordingController;
+use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\RecordingChunkController;
 use App\Http\Controllers\Api\RecordingCompletionController;
 use App\Http\Controllers\Api\RecordingController;
@@ -24,6 +26,9 @@ Route::post('/devices/broadcasting/auth', [BroadcastAuthController::class, 'devi
 Route::middleware('device')->group(function () {
     Route::post('/devices/heartbeat', [DeviceController::class, 'heartbeat']);
     Route::post('/devices/error', DeviceErrorController::class);
+    Route::get('/devices/schedules', [DeviceScheduleController::class, 'index']);
+    Route::post('/devices/recordings', [DeviceRecordingController::class, 'store'])
+        ->middleware('throttle:30,1');
 
     Route::post('/recordings/{recording:uuid}/chunks', [RecordingChunkController::class, 'store'])
         ->middleware('throttle:120,1');

@@ -16,6 +16,7 @@
         <table>
             <tr><th>Device</th><td><a href="{{ route('devices.show', $recording->device) }}">{{ $recording->device->name ?? $recording->device->device_uuid }}</a></td></tr>
             <tr><th>Status</th><td><span id="recording-status" class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td></tr>
+            <tr><th>Source</th><td><span class="badge">{{ $recording->source->value }}</span></td></tr>
             <tr><th>Started</th><td>{{ optional($recording->started_at)->toDayDateTimeString() ?? '—' }}</td></tr>
             <tr><th>Stopped</th><td>{{ optional($recording->stopped_at)->toDayDateTimeString() ?? '—' }}</td></tr>
             <tr><th>Duration</th><td>{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td></tr>

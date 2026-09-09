@@ -6,6 +6,7 @@ use App\Enums\CommandStatus;
 use App\Enums\CommandType;
 use App\Enums\DeviceStatus;
 use App\Enums\RecordingPreset;
+use App\Enums\RecordingSource;
 use App\Enums\RecordingStatus;
 use App\Events\DeviceStatusChanged;
 use App\Events\RecordingStarted;
@@ -54,6 +55,7 @@ class RecordingLifecycleService
                 'device_id' => $device->id,
                 'status' => RecordingStatus::STARTING,
                 'preset' => $preset,
+                'source' => RecordingSource::ADMIN,
                 'encoder' => $target['encoder'],
                 'sample_rate' => $target['sample_rate'],
                 'bitrate' => $target['bitrate'],

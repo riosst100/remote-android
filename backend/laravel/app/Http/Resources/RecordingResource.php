@@ -19,6 +19,7 @@ class RecordingResource extends JsonResource
             ]),
             'status' => $this->status->value,
             'preset' => $this->preset->value,
+            'source' => $this->source->value,
             'encoder' => $this->encoder,
             'sample_rate' => $this->sample_rate,
             'bitrate' => $this->bitrate,
