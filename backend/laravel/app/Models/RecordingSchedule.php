@@ -41,4 +41,20 @@ class RecordingSchedule extends Model
     {
         return Carbon::create(2026, 1, 4 + $this->day_of_week)->format('l');
     }
+
+    /**
+     * Whether this schedule has actually reached the device yet. The
+     * device is the sole authority for triggering scheduled recordings —
+     * it pulls its schedule list periodically (see DeviceScheduleController)
+     * rather than the server pushing changes — so a schedule can exist here
+     * for up to that pull interval before the device has ever seen it (or
+     * seen an edit to it). True once the device's last successful pull
+     * happened at or after this schedule was last created/edited.
+     */
+    public function isSyncedToDevice(): bool
+    {
+        $syncedAt = $this->device?->schedules_synced_at;
+
+        return $syncedAt !== null && $syncedAt->gte($this->updated_at);
+    }
 }

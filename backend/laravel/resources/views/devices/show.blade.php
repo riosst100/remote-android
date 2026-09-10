@@ -67,7 +67,7 @@
     <p class="muted">Times are Asia/Jakarta (WIB / UTC+7). Each schedule starts a recording at the given day and time every week and stops it automatically after the set duration.</p>
 
     <table style="margin-bottom:16px;">
-        <thead><tr><th>Day</th><th>Time</th><th>Preset</th><th>Duration</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Day</th><th>Time</th><th>Preset</th><th>Duration</th><th>Status</th><th>On Device</th><th></th></tr></thead>
         <tbody>
         @forelse ($device->schedules as $schedule)
             <tr>
@@ -84,6 +84,15 @@
                     </form>
                 </td>
                 <td>
+                    @if (! $schedule->is_active)
+                        <span class="muted" title="Disabled schedules aren't pulled by the device.">—</span>
+                    @elseif ($schedule->isSyncedToDevice())
+                        <span title="Device last pulled its schedule list at {{ $device->schedules_synced_at->toDayDateTimeString() }}.">Synced</span>
+                    @else
+                        <span class="muted" title="Device hasn't pulled this schedule yet — it syncs its list periodically, not instantly on change.">Pending pull…</span>
+                    @endif
+                </td>
+                <td>
                     <form method="POST" action="{{ route('devices.schedules.destroy', [$device, $schedule]) }}" style="display:inline;" onsubmit="return confirm('Remove this schedule?');">
                         @csrf
                         @method('DELETE')
@@ -92,7 +101,7 @@
                 </td>
             </tr>
         @empty
-            <tr><td colspan="6" class="muted">No schedules yet.</td></tr>
+            <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
         @endforelse
         </tbody>
     </table>

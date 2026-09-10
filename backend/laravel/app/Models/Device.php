@@ -24,6 +24,7 @@ class Device extends Model
         'current_recording_id',
         'api_token_id',
         'last_seen_at',
+        'schedules_synced_at',
     ];
 
     protected function casts(): array
@@ -32,6 +33,7 @@ class Device extends Model
             'capabilities' => 'array',
             'status' => DeviceStatus::class,
             'last_seen_at' => 'datetime',
+            'schedules_synced_at' => 'datetime',
         ];
     }
 
