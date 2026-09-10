@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
+import com.remoterecorder.agent.model.AudioEncoder
 import com.remoterecorder.agent.model.Command
 import com.remoterecorder.agent.model.CommandType
 import com.remoterecorder.agent.model.DeviceSchedule
@@ -11,6 +12,7 @@ import com.remoterecorder.agent.model.ErrorCode
 import com.remoterecorder.agent.model.RecordingConfig
 import com.remoterecorder.agent.network.ApiClient
 import com.remoterecorder.agent.util.AgentLog
+import com.remoterecorder.agent.util.PendingRecording
 import com.remoterecorder.agent.util.PendingRecordingStore
 import com.remoterecorder.agent.work.ChunkUploadWorker
 import org.json.JSONObject
@@ -38,6 +40,10 @@ class RecordingSessionManager(
 
     @Volatile var state: State = State.IDLE
         private set
+
+    companion object {
+        private const val DEFAULT_CHUNK_TARGET_SECONDS = 20
+    }
 
     fun handleCommand(command: Command) {
         when (command.type) {
@@ -76,27 +82,68 @@ class RecordingSessionManager(
         val localRecordingId = UUID.randomUUID().toString()
         val startedAt = Instant.now()
         val resolved = CapabilityFallback.resolve(RecordingConfig.fromPreset(schedule.preset))
-        val chunkTargetSeconds = 20
 
-        val newRecorder = ChunkingAudioRecorder(
-            context = context,
-            config = resolved,
-            chunkTargetSeconds = chunkTargetSeconds,
-            onChunkReady = { chunk -> onChunkReady(localRecordingId, chunk) },
-            onError = { onScheduledRecordingError(localRecordingId, it) },
-        )
-
-        activeRecordingId = localRecordingId
-        activeCommandId = null // no server command backs this
-        activeSource = Source.SCHEDULE_DEVICE
-        state = State.RECORDING
-        recorder = newRecorder
-        newRecorder.start()
+        beginCapture(localRecordingId, resolved, startingChunkNumber = 0)
 
         PendingRecordingStore(context).markStarted(localRecordingId, schedule, startedAt, resolved)
         tryRegisterNow(localRecordingId, schedule, startedAt, resolved)
 
         return localRecordingId
+    }
+
+    /**
+     * Resumes capture for a recording that was still active (never reached
+     * `stopFromSchedule`) when the process was last killed — called from
+     * `RecordingForegroundService.onCreate` after a START_STICKY restart.
+     * Continues chunk numbering from `pending.lastChunkNumber` so the next
+     * chunk doesn't collide with ones already uploaded for this recording;
+     * the gap between the kill and this resume (at most a few chunks' worth
+     * of audio) is an accepted, unavoidable loss — MediaRecorder itself
+     * cannot survive a process death, only the already-flushed chunks and
+     * this bookkeeping do.
+     *
+     * Returns false if capture could not be resumed (e.g. mic permission
+     * revoked meanwhile) — the caller is expected to mark the recording
+     * finished/stopped in that case so it isn't left dangling forever.
+     */
+    @Synchronized
+    fun resumeFromPending(pending: PendingRecording): Boolean {
+        if (state != State.IDLE) {
+            AgentLog.w("session", "Resume requested for ${pending.localId} while already $state; ignoring.")
+            return false
+        }
+        if (!hasMicPermission()) {
+            AgentLog.e("session", "Cannot resume recording ${pending.localId}: RECORD_AUDIO not granted.")
+            return false
+        }
+
+        val config = RecordingConfig(
+            encoder = AudioEncoder.valueOf(pending.encoder.uppercase()),
+            sampleRate = pending.sampleRate,
+            bitrate = pending.bitrate,
+            channels = pending.channels,
+        )
+
+        AgentLog.i("session", "Resuming recording ${pending.localId} from chunk #${pending.lastChunkNumber + 1} after process restart.")
+        beginCapture(pending.localId, config, startingChunkNumber = pending.lastChunkNumber)
+        return true
+    }
+
+    private fun beginCapture(recordingId: String, config: RecordingConfig, startingChunkNumber: Int) {
+        val newRecorder = ChunkingAudioRecorder(
+            context = context,
+            config = config,
+            chunkTargetSeconds = DEFAULT_CHUNK_TARGET_SECONDS,
+            onChunkReady = { chunk -> onChunkReady(recordingId, chunk) },
+            onError = { onScheduledRecordingError(recordingId, it) },
+        )
+
+        activeRecordingId = recordingId
+        activeCommandId = null // no server command backs this
+        activeSource = Source.SCHEDULE_DEVICE
+        state = State.RECORDING
+        recorder = newRecorder
+        newRecorder.start(startingChunkNumber)
     }
 
     /**
@@ -246,6 +293,11 @@ class RecordingSessionManager(
 
     private fun onChunkReady(recordingId: String, chunk: ChunkingAudioRecorder.ChunkFile) {
         AgentLog.i("session", "Chunk #${chunk.chunkNumber} ready (${chunk.file.length()} bytes), enqueuing upload.")
+        // No-op for admin-triggered recordings (no PendingRecordingStore
+        // entry exists for those) — only relevant for schedule-triggered
+        // ones, where it's what lets a post-kill resume continue numbering
+        // correctly (see RecordingSessionManager.resumeFromPending).
+        PendingRecordingStore(context).markChunkProduced(recordingId, chunk.chunkNumber)
         ChunkUploadWorker.enqueue(
             context = context,
             recordingId = recordingId,

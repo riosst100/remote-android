@@ -32,6 +32,16 @@ data class PendingRecording(
     val registeredServerSide: Boolean,
     val finished: Boolean,
     val completed: Boolean,
+    /**
+     * Highest chunk number successfully produced so far. Persisted (not
+     * just in-memory on RecordingSessionManager) so that if the OS kills
+     * the process mid-recording and the foreground service restarts via
+     * START_STICKY, a resumed ChunkingAudioRecorder can continue chunk
+     * numbering from here instead of restarting at 1 and colliding with
+     * already-uploaded chunks (ChunkUploadWorker/the server both key
+     * uploads on (recording_id, chunk_number)).
+     */
+    val lastChunkNumber: Int = 0,
 )
 
 class PendingRecordingStore(context: Context) {
@@ -52,6 +62,7 @@ class PendingRecordingStore(context: Context) {
             registeredServerSide = false,
             finished = false,
             completed = false,
+            lastChunkNumber = 0,
         )
         writeAll(all)
     }
@@ -62,6 +73,9 @@ class PendingRecordingStore(context: Context) {
 
     fun markCompleted(id: String) = update(id) { it.copy(completed = true) }
 
+    /** Called as each chunk is produced, so a post-kill resume knows where to continue numbering from. */
+    fun markChunkProduced(id: String, chunkNumber: Int) = update(id) { it.copy(lastChunkNumber = maxOf(it.lastChunkNumber, chunkNumber)) }
+
     /** All recordings not yet fully completed server-side; prunes completed entries as a side effect. */
     fun getAllPending(): List<PendingRecording> {
         val all = readAll()
@@ -71,6 +85,15 @@ class PendingRecordingStore(context: Context) {
         }
         return pending
     }
+
+    /**
+     * Recordings that were still actively capturing (never reached
+     * markFinishedRecording) when this store was last written — i.e. the
+     * process most likely died mid-recording rather than stopping cleanly.
+     * Used by RecordingForegroundService.onCreate to resume capture after
+     * an OS kill.
+     */
+    fun getUnfinished(): List<PendingRecording> = readAll().values.filter { !it.finished && !it.completed }
 
     private fun update(id: String, transform: (PendingRecording) -> PendingRecording) {
         val all = readAll().toMutableMap()
@@ -106,6 +129,7 @@ class PendingRecordingStore(context: Context) {
         put("registered_server_side", p.registeredServerSide)
         put("finished", p.finished)
         put("completed", p.completed)
+        put("last_chunk_number", p.lastChunkNumber)
     }
 
     private fun fromJson(json: JSONObject): PendingRecording = PendingRecording(
@@ -120,6 +144,7 @@ class PendingRecordingStore(context: Context) {
         registeredServerSide = json.optBoolean("registered_server_side", false),
         finished = json.optBoolean("finished", false),
         completed = json.optBoolean("completed", false),
+        lastChunkNumber = json.optInt("last_chunk_number", 0),
     )
 
     companion object {

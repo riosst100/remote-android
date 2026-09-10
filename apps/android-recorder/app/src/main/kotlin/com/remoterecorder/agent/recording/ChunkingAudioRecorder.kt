@@ -38,10 +38,17 @@ class ChunkingAudioRecorder(
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     @Volatile private var isRecording = false
 
-    fun start() {
+    /**
+     * @param startingChunkNumber Numbering continues from here + 1 rather
+     * than always restarting at 1 — needed when resuming a recording after
+     * the process was killed mid-session (see RecordingForegroundService's
+     * resume-on-create path), so the next chunk doesn't collide with
+     * chunk numbers already uploaded for this recording.
+     */
+    fun start(startingChunkNumber: Int = 0) {
         if (isRecording) return
         isRecording = true
-        chunkNumber = 0
+        chunkNumber = startingChunkNumber
         startNextChunk()
     }
 
