@@ -32,6 +32,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/devices', [DeviceDashboardController::class, 'index'])->name('devices.index');
     Route::get('/devices/{device}', [DeviceDashboardController::class, 'show'])->name('devices.show');
+    Route::delete('/devices/{device}', [DeviceDashboardController::class, 'destroy'])->name('devices.destroy');
 
     Route::post('/devices/{device}/schedules', [RecordingScheduleController::class, 'store'])->name('devices.schedules.store');
     Route::post('/devices/{device}/schedules/{schedule}/toggle', [RecordingScheduleController::class, 'toggle'])->name('devices.schedules.toggle');

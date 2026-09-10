@@ -4,7 +4,15 @@
 
 @section('content')
 <p><a href="{{ route('devices.index') }}">&larr; Devices</a></p>
-<h2 style="margin-top:0;">{{ $device->name ?? 'Unnamed device' }}</h2>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
+    <h2 style="margin-top:0;">{{ $device->name ?? 'Unnamed device' }}</h2>
+    <form method="POST" action="{{ route('devices.destroy', $device) }}"
+          onsubmit="return confirm('Delete this device and ALL of its recordings? This cannot be undone.');">
+        @csrf
+        @method('DELETE')
+        <button type="submit" class="danger">Delete Device</button>
+    </form>
+</div>
 
 <div class="grid cols-2" style="margin-bottom:24px;">
     <div class="card">

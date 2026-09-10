@@ -52,6 +52,12 @@
                     </select>
                     <button class="primary start-btn" data-device="{{ $device->id }}" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start</button>
                     <button class="danger stop-btn" data-recording="{{ $active->uuid ?? '' }}" {{ $active ? '' : 'disabled' }}>Stop</button>
+                    <form method="POST" action="{{ route('devices.destroy', $device) }}" style="display:inline;"
+                          onsubmit="return confirm('Delete this device and ALL of its recordings? This cannot be undone.');">
+                        @csrf
+                        @method('DELETE')
+                        <button type="submit" class="danger" {{ $active ? 'disabled title="Stop the active recording first."' : '' }}>Delete</button>
+                    </form>
                 </td>
             </tr>
             @empty

@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Web;
 
 use App\Enums\RecordingPreset;
+use App\Exceptions\DeviceHasActiveRecordingException;
 use App\Http\Controllers\Controller;
 use App\Models\Device;
 use App\Services\AudioConfigurationResolver;
+use App\Services\DeviceDeletionService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 class DeviceDashboardController extends Controller
@@ -33,6 +36,17 @@ class DeviceDashboardController extends Controller
         $previewConfigs = $this->resolveConfigsFor($device, $presets, $resolver);
 
         return view('devices.show', compact('device', 'presets', 'previewConfigs'));
+    }
+
+    public function destroy(Device $device, DeviceDeletionService $service): RedirectResponse
+    {
+        try {
+            $service->delete($device);
+        } catch (DeviceHasActiveRecordingException $e) {
+            return back()->with('status', $e->getMessage());
+        }
+
+        return redirect()->route('devices.index')->with('status', "Device \"{$device->name}\" and all its recordings have been deleted.");
     }
 
     /**
