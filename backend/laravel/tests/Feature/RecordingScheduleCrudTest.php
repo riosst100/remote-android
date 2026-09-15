@@ -46,7 +46,7 @@ class RecordingScheduleCrudTest extends TestCase
         ])->assertSessionHasErrors('day_of_week');
     }
 
-    public function test_creating_a_schedule_rejects_lossless_preset(): void
+    public function test_creating_a_schedule_accepts_lossless_preset(): void
     {
         $this->actingAs(User::factory()->create());
         $device = Device::factory()->create();
@@ -56,7 +56,7 @@ class RecordingScheduleCrudTest extends TestCase
             'time_of_day' => '03:30',
             'preset' => 'LOSSLESS',
             'duration_minutes' => 30,
-        ])->assertSessionHasErrors('preset');
+        ])->assertSessionHasNoErrors();
     }
 
     public function test_an_admin_can_toggle_a_schedule_active_state(): void
