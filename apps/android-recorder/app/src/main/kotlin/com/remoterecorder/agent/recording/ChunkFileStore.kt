@@ -20,15 +20,11 @@ object ChunkFileStore {
         return dir
     }
 
-    fun newChunkFile(context: Context, chunkNumber: Int): File {
-        return File(directory(context), fileName(chunkNumber))
+    fun newChunkFile(context: Context, chunkNumber: Int, extension: String = "aac"): File {
+        return File(directory(context), fileName(chunkNumber, extension))
     }
 
-    fun fileFor(context: Context, chunkNumber: Int): File {
-        return File(directory(context), fileName(chunkNumber))
-    }
-
-    private fun fileName(chunkNumber: Int): String = "chunk-%05d.aac".format(chunkNumber)
+    private fun fileName(chunkNumber: Int, extension: String): String = "chunk-%05d.%s".format(chunkNumber, extension)
 
     /** Deletes a chunk's temp file once the server has acknowledged the upload. */
     fun delete(file: File) {

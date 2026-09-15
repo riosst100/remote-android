@@ -1,27 +1,39 @@
 package com.remoterecorder.agent.recording
 
 import android.content.Context
-import android.media.MediaRecorder
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import com.remoterecorder.agent.model.AudioEncoder
 import com.remoterecorder.agent.model.RecordingConfig
 import com.remoterecorder.agent.util.AgentLog
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.File
+import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.concurrent.LinkedBlockingQueue
+import kotlin.concurrent.thread
 
 /**
- * Records audio in successive, independently-playable AAC/ADTS files
- * instead of one continuous stream. Every [chunkTargetSeconds] the current
- * [MediaRecorder] is stopped and a new one started into a fresh file, which
- * is what makes chunk upload possible without ever holding the full
- * recording in memory or needing to slice a single large file after the
- * fact.
+ * Records audio as one continuous, uninterrupted capture — [AudioRecord]
+ * and the [MediaCodec] encoder are opened once per session and never
+ * stopped/restarted between chunks — while still emitting successive,
+ * independently-playable chunk files exactly like the old
+ * MediaRecorder-per-chunk approach did.
  *
- * Chunks are written to the app's cache directory — temporary, technically
- * required storage, never a permanent copy (see [ChunkFileStore]).
+ * The previous implementation stopped and restarted MediaRecorder every
+ * [chunkTargetSeconds] to produce each chunk file, which meant the
+ * microphone briefly stopped capturing at every chunk boundary (observed
+ * as an audible gap when chunks are played back-to-back). Here the chunk
+ * boundary is purely a decision about where to close one output file and
+ * open the next among encoded frames flowing continuously off the
+ * encoder — capture itself never pauses.
+ *
+ * Encoded frames are self-contained (ADTS-framed AAC, or FLAC's own
+ * native framing), so splitting the stream between frames produces chunk
+ * files that remain independently valid and byte-concatenable, same as
+ * before.
  */
 class ChunkingAudioRecorder(
     private val context: Context,
@@ -32,17 +44,77 @@ class ChunkingAudioRecorder(
 ) {
     data class ChunkFile(val file: File, val chunkNumber: Int, val durationSeconds: Int, val checksum: String, val mimeType: String)
 
-    private var recorder: MediaRecorder? = null
-    private var chunkNumber = 0
-    private var rotationJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.IO + Job())
+    private var audioRecord: AudioRecord? = null
+    private var codec: MediaCodec? = null
+    private var captureThread: Thread? = null
+    private var encoderThread: Thread? = null
     @Volatile private var isRecording = false
+    @Volatile private var stopRequested = false
+
+    private val pcmQueue = LinkedBlockingQueue<PcmBuffer>()
+    private data class PcmBuffer(val data: ByteArray, val length: Int, val endOfStream: Boolean = false)
+
+    private var chunkWriter: ChunkWriter? = null
+    private var chunkNumber = 0
+    private var chunkStartNanos = 0L
+    private val chunkTargetNanos get() = chunkTargetSeconds * 1_000_000_000L
+
+    private val lastChunkLock = Object()
+    private var lastFinishedChunk: ChunkFile? = null
 
     fun start() {
         if (isRecording) return
-        isRecording = true
+
+        val mimeType = mimeTypeFor(config.encoder)
+        val channelConfig = if (config.channels >= 2) AudioFormat.CHANNEL_IN_STEREO else AudioFormat.CHANNEL_IN_MONO
+        val minBuffer = AudioRecord.getMinBufferSize(config.sampleRate, channelConfig, AudioFormat.ENCODING_PCM_16BIT)
+        if (minBuffer <= 0) {
+            onError(IllegalStateException("AudioRecord.getMinBufferSize returned $minBuffer for this configuration."))
+            return
+        }
+        val bufferSize = minBuffer * 4
+
+        val record = try {
+            AudioRecord(
+                android.media.MediaRecorder.AudioSource.MIC,
+                config.sampleRate,
+                channelConfig,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize,
+            )
+        } catch (e: Exception) {
+            onError(e)
+            return
+        }
+
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            onError(IllegalStateException("AudioRecord failed to initialize."))
+            return
+        }
+
+        val mediaCodec = try {
+            buildEncoder(mimeType)
+        } catch (e: Exception) {
+            record.release()
+            onError(e)
+            return
+        }
+
+        audioRecord = record
+        codec = mediaCodec
         chunkNumber = 0
-        startNextChunk()
+        stopRequested = false
+        isRecording = true
+
+        chunkWriter = ChunkWriter(context, config.encoder, ++chunkNumber).also { it.open() }
+        chunkStartNanos = System.nanoTime()
+
+        mediaCodec.start()
+        record.startRecording()
+
+        captureThread = thread(name = "audio-capture") { captureLoop(record, bufferSize) }
+        encoderThread = thread(name = "audio-encode") { encodeLoop(mediaCodec, mimeType) }
     }
 
     /**
@@ -52,150 +124,233 @@ class ChunkingAudioRecorder(
      */
     fun stop(): ChunkFile? {
         if (!isRecording) return null
+        stopRequested = true
+
+        // Wake the capture loop immediately rather than waiting for it to
+        // notice stopRequested on its next read cycle.
+        captureThread?.join(5_000)
+        encoderThread?.join(5_000)
+
         isRecording = false
-        rotationJob?.cancel()
-        return finishCurrentChunk()
+        audioRecord?.let { runCatching { it.release() } }
+        codec?.let { runCatching { it.stop() }; runCatching { it.release() } }
+        audioRecord = null
+        codec = null
+
+        synchronized(lastChunkLock) {
+            val result = lastFinishedChunk
+            lastFinishedChunk = null
+            return result
+        }
     }
 
-    private fun startNextChunk() {
-        chunkNumber += 1
-        val file = ChunkFileStore.newChunkFile(context, chunkNumber)
+    private fun captureLoop(record: AudioRecord, bufferSize: Int) {
+        val buffer = ByteArray(bufferSize)
+        try {
+            while (!stopRequested) {
+                val read = record.read(buffer, 0, buffer.size)
+                if (read > 0) {
+                    pcmQueue.put(PcmBuffer(buffer.copyOf(read), read))
+                }
+            }
+        } catch (e: Exception) {
+            AgentLog.e("recorder", "Audio capture loop failed", e)
+            onError(e)
+        } finally {
+            runCatching { record.stop() }
+            pcmQueue.put(PcmBuffer(ByteArray(0), 0, endOfStream = true))
+        }
+    }
 
-        val newRecorder = buildRecorder(file)
+    private fun encodeLoop(mediaCodec: MediaCodec, mimeType: String) {
+        val bufferInfo = MediaCodec.BufferInfo()
+        var sawEndOfStream = false
 
         try {
-            newRecorder.prepare()
-            newRecorder.start()
-        } catch (e: Exception) {
-            AgentLog.e("recorder", "Failed to start MediaRecorder", e)
-            onError(e)
-            return
-        }
+            while (!sawEndOfStream) {
+                val pending = pcmQueue.take()
 
-        recorder = newRecorder
-        AgentLog.i("recorder", "Started chunk #$chunkNumber -> ${file.name}")
+                if (pending.length > 0) {
+                    feedInput(mediaCodec, pending.data, pending.length)
+                }
+                if (pending.endOfStream) {
+                    feedEndOfStream(mediaCodec)
+                }
 
-        rotationJob = scope.launch {
-            delay(chunkTargetSeconds * 1000L)
-            if (isRecording) {
-                rotateChunk()
+                var draining = true
+                while (draining) {
+                    val outIndex = mediaCodec.dequeueOutputBuffer(bufferInfo, 10_000)
+                    when {
+                        outIndex >= 0 -> {
+                            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                                sawEndOfStream = true
+                            }
+                            if (bufferInfo.size > 0 && bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                                val encoded = mediaCodec.getOutputBuffer(outIndex)
+                                if (encoded != null) {
+                                    writeEncodedFrame(encoded, bufferInfo, mimeType)
+                                }
+                            }
+                            mediaCodec.releaseOutputBuffer(outIndex, false)
+                        }
+                        outIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> draining = false
+                        else -> { /* format changed / output buffers changed: nothing to do */ }
+                    }
+                }
             }
+        } catch (e: Exception) {
+            AgentLog.e("recorder", "Audio encode loop failed", e)
+            onError(e)
+        } finally {
+            finishActiveChunk()
         }
+    }
+
+    private fun feedInput(mediaCodec: MediaCodec, data: ByteArray, length: Int) {
+        var offset = 0
+        while (offset < length) {
+            val inIndex = mediaCodec.dequeueInputBuffer(10_000)
+            if (inIndex < 0) continue
+            val inputBuffer = mediaCodec.getInputBuffer(inIndex) ?: continue
+            val chunkLen = minOf(inputBuffer.capacity(), length - offset)
+            inputBuffer.clear()
+            inputBuffer.put(data, offset, chunkLen)
+            mediaCodec.queueInputBuffer(inIndex, 0, chunkLen, System.nanoTime() / 1000, 0)
+            offset += chunkLen
+        }
+    }
+
+    private fun feedEndOfStream(mediaCodec: MediaCodec) {
+        val inIndex = mediaCodec.dequeueInputBuffer(10_000)
+        if (inIndex >= 0) {
+            mediaCodec.queueInputBuffer(inIndex, 0, 0, System.nanoTime() / 1000, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+        }
+    }
+
+    /**
+     * Writes one encoded frame to the current chunk file, rotating to a
+     * new chunk file first if this frame would cross the chunk boundary.
+     * Rotation only ever happens between frames — never mid-frame — so
+     * every chunk file stays independently valid.
+     */
+    private fun writeEncodedFrame(buffer: java.nio.ByteBuffer, info: MediaCodec.BufferInfo, mimeType: String) {
+        val now = System.nanoTime()
+        if (now - chunkStartNanos >= chunkTargetNanos) {
+            rotateChunk()
+        }
+
+        val bytes = ByteArray(info.size)
+        buffer.position(info.offset)
+        buffer.get(bytes, 0, info.size)
+
+        val framed = if (mimeType == MediaFormat.MIMETYPE_AUDIO_AAC) wrapInAdts(bytes, config.sampleRate, config.channels) else bytes
+        chunkWriter?.write(framed)
     }
 
     private fun rotateChunk() {
-        val finished = finishCurrentChunk()
-        if (finished != null) onChunkReady(finished)
-        if (isRecording) startNextChunk()
+        finishActiveChunk()?.let { onChunkReady(it) }
+        if (!stopRequested) {
+            chunkWriter = ChunkWriter(context, config.encoder, ++chunkNumber).also { it.open() }
+            chunkStartNanos = System.nanoTime()
+        }
+    }
+
+    private fun finishActiveChunk(): ChunkFile? {
+        val writer = chunkWriter ?: return null
+        chunkWriter = null
+        val finished = writer.closeAndDescribe(chunkTargetSeconds)
+        synchronized(lastChunkLock) { lastFinishedChunk = finished }
+        return finished
+    }
+
+    private fun buildEncoder(mimeType: String): MediaCodec {
+        val format = MediaFormat.createAudioFormat(mimeType, config.sampleRate, config.channels)
+        format.setInteger(MediaFormat.KEY_BIT_RATE, if (config.bitrate > 0) config.bitrate else 0)
+        format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+        if (mimeType == MediaFormat.MIMETYPE_AUDIO_FLAC) {
+            format.setInteger(MediaFormat.KEY_FLAC_COMPRESSION_LEVEL, 5)
+        }
+
+        val codec = MediaCodec.createEncoderByType(mimeType)
+        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        return codec
+    }
+
+    private fun mimeTypeFor(encoder: AudioEncoder): String = when (encoder) {
+        AudioEncoder.AAC -> MediaFormat.MIMETYPE_AUDIO_AAC
+        AudioEncoder.FLAC -> MediaFormat.MIMETYPE_AUDIO_FLAC
+        AudioEncoder.OPUS -> MediaFormat.MIMETYPE_AUDIO_OPUS
     }
 
     /**
-     * Stops the active recorder (if any) and emits its finished chunk.
-     *
-     * MediaRecorder.stop() throwing is a real, OEM-visible failure mode
-     * (observed on Xiaomi/MIUI in particular, e.g. when a chunk is very
-     * short) — but release() must run regardless, since a MediaRecorder
-     * that's never released keeps holding the microphone: the recording
-     * indicator stays on and the mic is unusable until the process dies,
-     * even though the app itself has moved on to IDLE. That's the
-     * try/finally below, not just a try/catch.
+     * MediaCodec's AAC encoder emits raw AAC access units without ADTS
+     * framing — MediaRecorder.OutputFormat.AAC_ADTS used to add that for
+     * us. ADTS framing is what makes each chunk file independently
+     * playable/concatenable, so it's reconstructed by hand here.
      */
-    private fun finishCurrentChunk(): ChunkFile? {
-        val current = recorder ?: return null
-        val currentChunkNumber = chunkNumber
-        recorder = null
+    private fun wrapInAdts(aac: ByteArray, sampleRate: Int, channels: Int): ByteArray {
+        val frameLength = aac.size + 7
+        val header = ByteArray(7)
+        val freqIndex = ADTS_SAMPLE_RATES.indexOf(sampleRate).let { if (it < 0) 4 else it } // default 44100
 
-        var stopFailed = false
-        try {
-            current.stop()
-        } catch (e: Exception) {
-            AgentLog.e("recorder", "MediaRecorder.stop() failed for chunk #$currentChunkNumber; releasing anyway.", e)
-            stopFailed = true
-        } finally {
-            runCatching { current.release() }
-        }
+        header[0] = 0xFF.toByte()
+        header[1] = 0xF9.toByte() // MPEG-4, no CRC
+        val profileBits = MediaCodecInfo.CodecProfileLevel.AACObjectLC - 1
+        header[2] = ((profileBits shl 6) or (freqIndex shl 2) or (channels shr 2)).toByte()
+        header[3] = (((channels and 3) shl 6) or (frameLength shr 11)).toByte()
+        header[4] = ((frameLength shr 3) and 0xFF).toByte()
+        header[5] = (((frameLength and 7) shl 5) or 0x1F).toByte()
+        header[6] = 0xFC.toByte()
 
-        if (stopFailed) {
-            onError(IllegalStateException("MediaRecorder.stop() failed for chunk #$currentChunkNumber"))
-            return null
-        }
-
-        return try {
-            val file = ChunkFileStore.fileFor(context, currentChunkNumber)
-
-            // Some OEM encoders (observed on Xiaomi/MIUI) can still be
-            // flushing the last write(s) to disk for a brief moment after
-            // stop() returns; hashing immediately can checksum a file that
-            // hasn't finished being written, which then mismatches whatever
-            // OkHttp actually reads moments later when the upload happens.
-            // Waiting for the file's size to stop changing is a cheap,
-            // portable way to know the OS is done writing it.
-            waitForFileToStabilize(file)
-
-            val checksum = sha256(file)
-            val duration = estimateDurationSeconds(file, chunkTargetSeconds)
-
-            ChunkFile(file, currentChunkNumber, duration, checksum, "audio/aac")
-        } catch (e: Exception) {
-            AgentLog.e("recorder", "Failed to finalize chunk #$currentChunkNumber", e)
-            onError(e)
-            null
-        }
+        return header + aac
     }
 
-    private fun buildRecorder(outputFile: File): MediaRecorder {
-        @Suppress("DEPRECATION")
-        val newRecorder = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            MediaRecorder(context)
-        } else {
-            MediaRecorder()
+    private class ChunkWriter(context: Context, encoder: AudioEncoder, val chunkNumber: Int) {
+        private val file: File = ChunkFileStore.newChunkFile(context, chunkNumber, extensionFor(encoder))
+        private val mimeType: String = mimeTypeStringFor(encoder)
+        private var stream: FileOutputStream? = null
+        private val digest = MessageDigest.getInstance("SHA-256")
+        private var bytesWritten = 0L
+
+        fun open() {
+            stream = FileOutputStream(file)
         }
 
-        return newRecorder.apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.AAC_ADTS)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioSamplingRate(config.sampleRate)
-            setAudioEncodingBitRate(config.bitrate)
-            setAudioChannels(config.channels)
-            setOutputFile(outputFile.absolutePath)
+        fun write(bytes: ByteArray) {
+            stream?.write(bytes)
+            digest.update(bytes)
+            bytesWritten += bytes.size
         }
-    }
 
-    /**
-     * Polls the file's size a few times a short distance apart and returns
-     * once two consecutive reads agree, as a portable proxy for "the OS has
-     * finished writing this file." There's no cross-OEM API that reports
-     * this directly, so size-stability is the practical signal — bounded to
-     * a handful of short checks so a chunk can never hang here indefinitely.
-     */
-    private fun waitForFileToStabilize(file: File) {
-        var previousSize = -1L
-        repeat(5) {
-            val currentSize = file.length()
-            if (currentSize == previousSize && currentSize > 0) return
-            previousSize = currentSize
-            Thread.sleep(40)
+        fun closeAndDescribe(targetSeconds: Int): ChunkFile? {
+            stream?.let { runCatching { it.flush() }; runCatching { it.close() } }
+            stream = null
+
+            if (bytesWritten <= 0) {
+                runCatching { file.delete() }
+                return null
+            }
+
+            val checksum = digest.digest().joinToString("") { "%02x".format(it) }
+            return ChunkFile(file, chunkNumber, targetSeconds, checksum, mimeType)
         }
-    }
 
-    private fun estimateDurationSeconds(file: File, target: Int): Int {
-        // MediaRecorder doesn't give us a precise duration on stop for a raw
-        // ADTS stream without a full parse; the target chunk length is an
-        // accurate-enough value for chunk bookkeeping (the final recording's
-        // true duration is derived server-side from start/stop timestamps).
-        return if (file.length() > 0) target else 0
-    }
+        companion object {
+            fun extensionFor(encoder: AudioEncoder): String = when (encoder) {
+                AudioEncoder.AAC -> "aac"
+                AudioEncoder.FLAC -> "flac"
+                AudioEncoder.OPUS -> "opus"
+            }
 
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buffer = ByteArray(8192)
-            var read: Int
-            while (input.read(buffer).also { read = it } != -1) {
-                digest.update(buffer, 0, read)
+            fun mimeTypeStringFor(encoder: AudioEncoder): String = when (encoder) {
+                AudioEncoder.AAC -> "audio/aac"
+                AudioEncoder.FLAC -> "audio/flac"
+                AudioEncoder.OPUS -> "audio/opus"
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    companion object {
+        private val ADTS_SAMPLE_RATES = listOf(96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350)
     }
 }
