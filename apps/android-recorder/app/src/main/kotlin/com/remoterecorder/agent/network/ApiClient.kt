@@ -94,6 +94,7 @@ class ApiClient(private val tokenProvider: () -> String?) {
             .addFormDataPart("chunk_number", chunkNumber.toString())
             .addFormDataPart("checksum", checksum)
             .addFormDataPart("duration", durationSeconds.toString())
+            .addFormDataPart("mime_type", mimeType)
             .addFormDataPart("file", file.name, file.asRequestBody(mimeType.toMediaType()))
             .build()
 

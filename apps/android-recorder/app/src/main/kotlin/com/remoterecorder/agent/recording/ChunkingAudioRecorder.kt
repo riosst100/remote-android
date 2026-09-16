@@ -265,13 +265,35 @@ class ChunkingAudioRecorder(
 
     private fun buildEncoder(mimeType: String): MediaCodec {
         val format = MediaFormat.createAudioFormat(mimeType, config.sampleRate, config.channels)
-        format.setInteger(MediaFormat.KEY_BIT_RATE, if (config.bitrate > 0) config.bitrate else 0)
-        format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-        if (mimeType == MediaFormat.MIMETYPE_AUDIO_FLAC) {
-            format.setInteger(MediaFormat.KEY_FLAC_COMPRESSION_LEVEL, 5)
+        when (mimeType) {
+            MediaFormat.MIMETYPE_AUDIO_AAC -> {
+                format.setInteger(MediaFormat.KEY_BIT_RATE, config.bitrate)
+                format.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            }
+            MediaFormat.MIMETYPE_AUDIO_FLAC -> {
+                format.setInteger(MediaFormat.KEY_FLAC_COMPRESSION_LEVEL, 5)
+            }
+            else -> {
+                format.setInteger(MediaFormat.KEY_BIT_RATE, config.bitrate)
+            }
         }
 
+        // Some OEM MediaCodecList implementations (observed on Xiaomi/MIUI)
+        // resolve createEncoderByType to an unrelated codec instead of
+        // throwing when the requested mime type isn't really available in
+        // hardware — configure() then "succeeds" but silently encodes with
+        // whatever codec was actually selected. Checking the codec's own
+        // declared supported types against what we asked for turns that
+        // mismatch into a real, reported error instead of silently wrong
+        // audio (e.g. a FLAC request quietly producing an AAC stream).
         val codec = MediaCodec.createEncoderByType(mimeType)
+        val declaresRequestedType = codec.codecInfo.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }
+        if (!declaresRequestedType) {
+            val codecName = codec.codecInfo.name
+            codec.release()
+            throw IllegalStateException("MediaCodec.createEncoderByType($mimeType) returned '$codecName', which doesn't declare support for $mimeType.")
+        }
+
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         return codec
     }
