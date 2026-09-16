@@ -14,4 +14,10 @@ return [
 
     // How long a device authentication token remains valid before rotation is recommended.
     'device_token_ttl_days' => env('RECORDER_DEVICE_TOKEN_TTL_DAYS', 365),
+
+    // Seconds a recording may sit in STOPPING/PROCESSING with no progress
+    // (no new chunk, no ack) before it's considered abandoned and auto-failed.
+    // Guards against a missed STOP_RECORDING/ack over the websocket leaving
+    // a recording stuck forever with no retry path.
+    'stuck_recording_timeout_seconds' => env('RECORDER_STUCK_RECORDING_TIMEOUT', 1800),
 ];

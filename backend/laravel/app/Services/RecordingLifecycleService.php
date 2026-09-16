@@ -9,6 +9,7 @@ use App\Enums\RecordingPreset;
 use App\Enums\RecordingSource;
 use App\Enums\RecordingStatus;
 use App\Events\DeviceStatusChanged;
+use App\Events\RecordingFailed;
 use App\Events\RecordingStarted;
 use App\Events\RecordingStartRequested;
 use App\Events\RecordingStopped;
@@ -17,6 +18,7 @@ use App\Exceptions\DeviceUnavailableException;
 use App\Models\Device;
 use App\Models\DeviceCommand;
 use App\Models\Recording;
+use App\Models\RecordingChunk;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -192,5 +194,62 @@ class RecordingLifecycleService
 
             return $recording;
         });
+    }
+
+    /**
+     * Fail recordings that have sat in STOPPING/PROCESSING with no progress
+     * (no new chunk uploaded, no command ack) past the configured timeout.
+     *
+     * A recording normally leaves STOPPING via the device's STOP_RECORDING
+     * ack, and leaves PROCESSING via its /complete call. Both of those are
+     * single, unretried round-trips over a websocket push + device-initiated
+     * HTTP call: if the device drops the connection, crashes, or is killed
+     * by the OS at the wrong moment, neither call ever happens and the
+     * recording (and the device's RECORDING status) would otherwise be
+     * stuck forever with no automatic recovery.
+     */
+    public function failStuckRecordings(): int
+    {
+        $timeout = config('recorder.stuck_recording_timeout_seconds');
+        $cutoff = now()->subSeconds($timeout);
+        $count = 0;
+
+        Recording::query()
+            ->whereIn('status', [RecordingStatus::STOPPING, RecordingStatus::PROCESSING])
+            ->where('updated_at', '<', $cutoff)
+            ->each(function (Recording $recording) use ($cutoff, &$count) {
+                $lastChunkAt = RecordingChunk::query()
+                    ->where('recording_id', $recording->id)
+                    ->max('created_at');
+
+                if ($lastChunkAt && $lastChunkAt >= $cutoff) {
+                    return;
+                }
+
+                DB::transaction(function () use ($recording) {
+                    $recording = Recording::query()->lockForUpdate()->findOrFail($recording->id);
+
+                    if ($recording->status->isTerminal()) {
+                        return;
+                    }
+
+                    $recording->forceFill([
+                        'status' => RecordingStatus::FAILED,
+                        'error_message' => 'Recording timed out waiting for the device to acknowledge the stop/finalize step.',
+                    ])->save();
+
+                    RecordingFailed::dispatch($recording->fresh());
+
+                    $device = $recording->device;
+                    if ($device && $device->status === DeviceStatus::RECORDING) {
+                        $device->forceFill(['status' => DeviceStatus::ONLINE])->save();
+                        DeviceStatusChanged::dispatch($device);
+                    }
+                });
+
+                $count++;
+            });
+
+        return $count;
     }
 }
