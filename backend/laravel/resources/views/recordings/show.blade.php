@@ -35,6 +35,37 @@
 </div>
 
 <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">Upload &amp; Merge Progress</h3>
+    <table>
+        <tr>
+            <th>Parts uploaded</th>
+            <td id="upload-progress-text">{{ $recording->chunks->count() }} part{{ $recording->chunks->count() === 1 ? '' : 's' }} received so far</td>
+        </tr>
+        <tr>
+            <th>Merge status</th>
+            <td id="merge-status-text">
+                @switch($recording->status->value)
+                    @case('COMPLETED')
+                        Merged into the final file below.
+                        @break
+                    @case('PROCESSING')
+                        Device finished recording — waiting for all parts to arrive, then merging.
+                        @break
+                    @case('STOPPING')
+                        Device is still uploading parts.
+                        @break
+                    @case('FAILED')
+                        Merge did not complete — see the error above.
+                        @break
+                    @default
+                        Recording in progress.
+                @endswitch
+            </td>
+        </tr>
+    </table>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
     <h3 style="margin-top:0;">Final File</h3>
     @if ($recording->file_path)
         <table>
@@ -48,20 +79,19 @@
 </div>
 
 <div class="card">
-    <h3 style="margin-top:0;">Chunks ({{ $recording->chunks->count() }})</h3>
+    <h3 style="margin-top:0;">Parts (<span id="chunk-count">{{ $recording->chunks->count() }}</span>)</h3>
     <table>
-        <thead><tr><th>#</th><th>Size</th><th>Duration</th><th>MIME</th><th>Uploaded</th></tr></thead>
-        <tbody>
+        <thead><tr><th>#</th><th>Size</th><th>MIME</th><th>Uploaded</th></tr></thead>
+        <tbody id="chunk-table-body">
         @forelse ($recording->chunks as $chunk)
             <tr>
                 <td>{{ $chunk->chunk_number }}</td>
                 <td>{{ number_format($chunk->size / 1024, 1) }} KB</td>
-                <td>{{ $chunk->duration }}s</td>
                 <td>{{ $chunk->mime_type }}</td>
                 <td class="muted">{{ optional($chunk->uploaded_at)->diffForHumans() }}</td>
             </tr>
         @empty
-            <tr><td colspan="5" class="muted">No chunks uploaded (or already merged into the final file).</td></tr>
+            <tr><td colspan="4" class="muted">No parts uploaded yet (or already merged into the final file).</td></tr>
         @endforelse
         </tbody>
     </table>
@@ -85,22 +115,52 @@ window.realtimeReady?.then((pusher) => {
         document.getElementById('error-banner').hidden = false;
     };
 
+    const setMergeStatus = (status) => {
+        const text = {
+            COMPLETED: 'Merged into the final file below.',
+            PROCESSING: 'Device finished recording — waiting for all parts to arrive, then merging.',
+            STOPPING: 'Device is still uploading parts.',
+            FAILED: 'Merge did not complete — see the error above.',
+        }[status] ?? 'Recording in progress.';
+        document.getElementById('merge-status-text').textContent = text;
+    };
+
     channel.bind('RecordingStatusChanged', (data) => {
         setStatus(data.status);
+        setMergeStatus(data.status);
         showError(data.error_message);
     });
-    channel.bind('RecordingStarted', (data) => setStatus(data.status));
-    channel.bind('RecordingStopped', (data) => setStatus(data.status));
-    channel.bind('ChunkUploaded', () => {
-        // A new chunk landed — reload to show it in the chunk table below.
-        // (Kept as a full reload rather than a DOM patch: chunk rows carry
-        // several fields and this page is a detail view someone dwells on,
-        // not a list glanced at repeatedly, so the trade-off favors simplicity.)
+    channel.bind('RecordingStarted', (data) => { setStatus(data.status); setMergeStatus(data.status); });
+    channel.bind('RecordingStopped', (data) => { setStatus(data.status); setMergeStatus(data.status); });
+    channel.bind('ChunkUploaded', (data) => {
+        // A recording can have many parts arriving one at a time (a long
+        // session splits into several 5-minute-ish parts) — bump the
+        // visible counters in place rather than reloading the whole page
+        // on every single part, which would otherwise flicker repeatedly
+        // during upload. The parts table gets a lightweight appended row
+        // too, so the detail is there without a full round-trip.
+        const countEl = document.getElementById('chunk-count');
+        const nextCount = parseInt(countEl.textContent, 10) + 1;
+        countEl.textContent = nextCount;
+        document.getElementById('upload-progress-text').textContent =
+            `${nextCount} part${nextCount === 1 ? '' : 's'} received so far`;
+
+        const tbody = document.getElementById('chunk-table-body');
+        if (tbody.children.length === 1 && tbody.children[0].children.length === 1) {
+            tbody.innerHTML = ''; // clear the "no parts yet" placeholder row
+        }
+        const row = document.createElement('tr');
+        const sizeKb = data.size ? (data.size / 1024).toFixed(1) : '—';
+        row.innerHTML = `<td>${data.chunk_number ?? nextCount}</td><td>${sizeKb} KB</td><td>audio/aac</td><td class="muted">just now</td>`;
+        tbody.appendChild(row);
+    });
+    channel.bind('RecordingCompleted', () => {
+        setMergeStatus('COMPLETED');
         location.reload();
     });
-    channel.bind('RecordingCompleted', () => location.reload());
     channel.bind('RecordingFailed', (data) => {
         setStatus('FAILED');
+        setMergeStatus('FAILED');
         showError(data.error_message);
     });
 

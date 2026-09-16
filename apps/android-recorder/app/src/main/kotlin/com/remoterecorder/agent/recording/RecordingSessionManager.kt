@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
-import com.remoterecorder.agent.model.AudioEncoder
 import com.remoterecorder.agent.model.Command
 import com.remoterecorder.agent.model.CommandType
 import com.remoterecorder.agent.model.DeviceSchedule
@@ -25,6 +24,18 @@ import java.util.UUID
  * a duplicate START while already recording is a no-op that still acks
  * (so the server doesn't wait forever for an ack that will never come),
  * and likewise for STOP.
+ *
+ * Recording is captured as one continuous, gapless file for the whole
+ * session (see [ChunkingAudioRecorder]) and only split into upload-sized
+ * parts — via [AdtsChunkSplitter] — once [stop] actually happens. This
+ * trades a safety property the old rotate-every-20s approach had (a
+ * crash mid-recording only lost the last few seconds, since prior chunks
+ * were already uploaded) for gaplessness: a device crash or kill now
+ * loses the entire in-progress recording, since nothing is split or
+ * uploaded until the session ends. Accepted trade-off — see
+ * [resumeFromPending], which now only reports the loss rather than
+ * actually resuming capture, since there is no longer a partial file to
+ * pick back up from.
  */
 class RecordingSessionManager(
     private val context: Context,
@@ -43,19 +54,11 @@ class RecordingSessionManager(
         private set
 
     private companion object {
-        // One file per recording rather than small rotating chunks (the old
-        // 20s rotation caused an audible gap at every boundary — see git
-        // history for the AudioRecord/MediaCodec approach that was tried and
-        // reverted, and PRE_WARM_LEAD_MILLIS in ChunkingAudioRecorder for the
-        // narrower gap that replaced it). 4 hours is a safety ceiling, not a
-        // real rotation interval — long enough that no normal recording ever
-        // hits it, short enough that a missed stop can't grow one file
-        // without bound.
-        const val DEFAULT_CHUNK_TARGET_SECONDS = 4 * 60 * 60
-        const val MAX_CHUNK_TARGET_SECONDS = 4 * 60 * 60
-
-        /** One automatic retry for a failed start/session before reporting FAILED to the admin. */
+        /** One automatic retry for a failed start before reporting FAILED to the admin. */
         const val MAX_START_RETRIES = 1
+
+        /** Split the whole-session recording into ~5-minute upload parts. */
+        const val TARGET_PART_BYTES = 5L * 60 * 32_000 // ~5 min at a 256kbps-class bitrate, rounded generously
     }
 
     fun handleCommand(command: Command) {
@@ -71,8 +74,7 @@ class RecordingSessionManager(
      * there is no DeviceCommand row to ack against. Registers with the
      * server immediately if online; if that call fails, recording proceeds
      * anyway and registration is retried later by PendingRecordingSyncWorker
-     * — audio capture is never gated on network reachability, matching the
-     * existing STOP/chunk-upload philosophy.
+     * — audio capture is never gated on network reachability.
      *
      * Returns the locally-generated recording id so the caller
      * (ScheduleAlarmReceiver) can arm the matching stop alarm.
@@ -97,25 +99,21 @@ class RecordingSessionManager(
         val resolved = CapabilityFallback.resolve(RecordingConfig.fromPreset(schedule.preset))
 
         activeRetryCount = 0
-        beginScheduledRecording(localRecordingId, schedule, startedAt, resolved, startingChunkNumber = 0)
+        beginScheduledRecording(localRecordingId, schedule, startedAt, resolved)
 
         return localRecordingId
     }
 
     /**
-     * Builds and starts the recorder for a fresh schedule-triggered
-     * session. Split out from [startFromSchedule] so
-     * [onScheduledRecordingError] can call it again for a
-     * same-recording-id retry without re-registering a new id with the
-     * server or re-running the idle/permission checks. A post-process-kill
-     * resume goes through [beginCapture] instead — see [resumeFromPending].
+     * Builds and starts the recorder for a schedule-triggered session.
+     * Split out from [startFromSchedule] so [onScheduledRecordingError] can
+     * call it again for a same-recording-id retry without re-registering a
+     * new id with the server or re-running the idle/permission checks.
      */
-    private fun beginScheduledRecording(localRecordingId: String, schedule: DeviceSchedule, startedAt: Instant, resolved: RecordingConfig, startingChunkNumber: Int) {
+    private fun beginScheduledRecording(localRecordingId: String, schedule: DeviceSchedule, startedAt: Instant, resolved: RecordingConfig) {
         val newRecorder = ChunkingAudioRecorder(
             context = context,
             config = resolved,
-            chunkTargetSeconds = DEFAULT_CHUNK_TARGET_SECONDS,
-            onChunkReady = { chunk -> onChunkReady(localRecordingId, chunk) },
             onError = { onScheduledRecordingError(localRecordingId, schedule, startedAt, resolved, it) },
         )
 
@@ -124,94 +122,31 @@ class RecordingSessionManager(
         activeSource = Source.SCHEDULE_DEVICE
         state = State.RECORDING
         recorder = newRecorder
-        newRecorder.start(startingChunkNumber)
+        newRecorder.start()
 
         PendingRecordingStore(context).markStarted(localRecordingId, schedule, startedAt, resolved)
         tryRegisterNow(localRecordingId, schedule, startedAt, resolved)
     }
 
     /**
-     * Resumes capture for a recording that was still active (never reached
-     * `stopFromSchedule`) when the process was last killed — called from
-     * `RecordingForegroundService.onCreate` after a START_STICKY restart.
-     * Continues chunk numbering from `pending.lastChunkNumber` so the next
-     * chunk doesn't collide with ones already uploaded for this recording;
-     * the gap between the kill and this resume (at most a few chunks' worth
-     * of audio) is an accepted, unavoidable loss — MediaRecorder itself
-     * cannot survive a process death, only the already-flushed chunks and
-     * this bookkeeping do.
+     * Called from `RecordingForegroundService.onCreate` after a
+     * START_STICKY restart finds a recording that was still active (never
+     * reached `stopFromSchedule`) when the process was last killed.
      *
-     * Returns false if capture could not be resumed (e.g. mic permission
-     * revoked meanwhile) — the caller is expected to mark the recording
-     * finished/stopped in that case so it isn't left dangling forever.
+     * Capture can no longer be resumed the way the old chunk-per-20s
+     * design allowed — MediaRecorder doesn't survive a process death, and
+     * with the whole session now living in one file that's still only
+     * partially written, there's nothing salvageable to pick back up from
+     * (unlike the old design, where prior chunks were already safely
+     * uploaded). This just marks the recording finished/failed server-side
+     * so it isn't left dangling in RECORDING state forever.
      */
-    @Synchronized
-    fun resumeFromPending(pending: PendingRecording): Boolean {
-        if (state != State.IDLE) {
-            AgentLog.w("session", "Resume requested for ${pending.localId} while already $state; ignoring.")
-            return false
-        }
-        if (!hasMicPermission()) {
-            AgentLog.e("session", "Cannot resume recording ${pending.localId}: RECORD_AUDIO not granted.")
-            return false
-        }
-
-        val config = RecordingConfig(
-            encoder = AudioEncoder.valueOf(pending.encoder.uppercase()),
-            sampleRate = pending.sampleRate,
-            bitrate = pending.bitrate,
-            channels = pending.channels,
-        )
-
-        AgentLog.i("session", "Resuming recording ${pending.localId} from chunk #${pending.lastChunkNumber + 1} after process restart.")
-        activeRetryCount = 0
-        beginCapture(pending.localId, config, startingChunkNumber = pending.lastChunkNumber)
-        return true
-    }
-
-    /**
-     * Builds and starts the recorder for a resumed-after-kill session.
-     * Unlike [beginScheduledRecording], this never re-registers or
-     * re-marks-started with [PendingRecordingStore] — `pending` already
-     * exists from the original startFromSchedule call, and re-touching it
-     * here would reset bookkeeping (like lastChunkNumber) that the resume
-     * itself depends on reading.
-     */
-    private fun beginCapture(recordingId: String, config: RecordingConfig, startingChunkNumber: Int) {
-        val newRecorder = ChunkingAudioRecorder(
-            context = context,
-            config = config,
-            chunkTargetSeconds = DEFAULT_CHUNK_TARGET_SECONDS,
-            onChunkReady = { chunk -> onChunkReady(recordingId, chunk) },
-            onError = { onResumedRecordingError(recordingId, config, startingChunkNumber, it) },
-        )
-
-        activeRecordingId = recordingId
-        activeCommandId = null // no server command backs this
-        activeSource = Source.SCHEDULE_DEVICE
-        state = State.RECORDING
-        recorder = newRecorder
-        newRecorder.start(startingChunkNumber)
-    }
-
-    @Synchronized
-    private fun onResumedRecordingError(recordingId: String, config: RecordingConfig, startingChunkNumber: Int, error: Throwable) {
-        AgentLog.e("session", "Resumed recording error for $recordingId", error)
-        if (activeRecordingId != recordingId) return // already superseded by a newer session
-
-        recorder = null
-
-        if (activeRetryCount < MAX_START_RETRIES) {
-            activeRetryCount++
-            AgentLog.w("session", "Retrying resumed recording start for $recordingId (attempt $activeRetryCount).")
-            beginCapture(recordingId, config, startingChunkNumber)
-            return
-        }
-
-        state = State.IDLE
-        activeRecordingId = null
-        activeSource = Source.NONE
-        activeRetryCount = 0
+    fun reportUnrecoverableAfterRestart(pending: PendingRecording) {
+        AgentLog.w("session", "Recording ${pending.localId} was still active when the process was killed; the in-progress file could not survive and is being marked failed.")
+        val store = PendingRecordingStore(context)
+        store.markFinishedRecording(pending.localId)
+        runCatching { apiClient.reportError("SERVICE_ERROR", "Recording lost: the app process was killed before it could be stopped.", pending.localId) }
+        store.markCompleted(pending.localId)
     }
 
     /**
@@ -228,9 +163,9 @@ class RecordingSessionManager(
         }
 
         state = State.STOPPING
-        val finalChunk = recorder?.stop()
+        val recorded = recorder?.stop()
         recorder = null
-        if (finalChunk != null) uploadChunkNow(recordingId, finalChunk)
+        if (recorded != null) splitAndUpload(recordingId, recorded)
 
         val store = PendingRecordingStore(context)
         store.markFinishedRecording(recordingId)
@@ -265,8 +200,8 @@ class RecordingSessionManager(
     @Synchronized
     private fun onScheduledRecordingError(recordingId: String, schedule: DeviceSchedule, startedAt: Instant, resolved: RecordingConfig, error: Throwable) {
         AgentLog.e("session", "Scheduled recording error for $recordingId", error)
-        // The recorder's onError callback runs on its own capture/encode
-        // thread, not the thread that called startFromSchedule — without
+        // The recorder's onError callback runs on its own capture thread,
+        // not the thread that called startFromSchedule — without
         // @Synchronized this races handleStart/handleStop/stopFromSchedule
         // mutating the same state/recorder/activeRecordingId fields from
         // whatever thread the WebSocket or alarm receiver runs on.
@@ -277,7 +212,7 @@ class RecordingSessionManager(
         if (activeRetryCount < MAX_START_RETRIES) {
             activeRetryCount++
             AgentLog.w("session", "Retrying scheduled recording start for $recordingId (attempt $activeRetryCount).")
-            beginScheduledRecording(recordingId, schedule, startedAt, resolved, startingChunkNumber = 0)
+            beginScheduledRecording(recordingId, schedule, startedAt, resolved)
             return
         }
 
@@ -322,17 +257,10 @@ class RecordingSessionManager(
     private fun beginAdminRecording(command: Command) {
         val requested = RecordingConfig.fromCommandPayload(command.payload)
         val resolved = CapabilityFallback.resolve(requested)
-        // Effectively "one file per recording" now (see DEFAULT_CHUNK_TARGET_SECONDS)
-        // rather than small rotating chunks — the upper bound is a safety
-        // net against an unbounded single file if a stop is somehow missed,
-        // not a real rotation interval.
-        val chunkTargetSeconds = command.payload.optInt("chunk_target_seconds", DEFAULT_CHUNK_TARGET_SECONDS).coerceIn(5, MAX_CHUNK_TARGET_SECONDS)
 
         val newRecorder = ChunkingAudioRecorder(
             context = context,
             config = resolved,
-            chunkTargetSeconds = chunkTargetSeconds,
-            onChunkReady = { chunk -> onChunkReady(command.recordingId, chunk) },
             onError = { onRecordingError(command, it) },
         )
 
@@ -362,20 +290,11 @@ class RecordingSessionManager(
 
         state = State.STOPPING
 
-        // The final chunk (which may be the *only* chunk, if the recording
-        // was shorter than one chunk_target_seconds interval) is uploaded
-        // synchronously here rather than just handed to WorkManager: /complete
-        // is about to be called immediately after, and finalization fails if
-        // no chunk has actually landed on the server yet. WorkManager still
-        // owns retry for this same upload if it fails here (see
-        // ChunkUploadWorker.enqueue's dedupe key), so a flaky network at stop
-        // time doesn't lose the chunk — it just means /complete won't succeed
-        // until that retry lands, which the dashboard can then re-trigger.
-        val finalChunk = recorder?.stop()
+        val recorded = recorder?.stop()
         recorder = null
 
-        if (finalChunk != null) {
-            uploadChunkNow(activeRecordingId ?: command.recordingId, finalChunk)
+        if (recorded != null) {
+            splitAndUpload(activeRecordingId ?: command.recordingId, recorded)
         }
 
         val recordingId = activeRecordingId
@@ -392,42 +311,39 @@ class RecordingSessionManager(
         activeSource = Source.NONE
     }
 
-    private fun onChunkReady(recordingId: String, chunk: ChunkingAudioRecorder.ChunkFile) {
-        AgentLog.i("session", "Chunk #${chunk.chunkNumber} ready (${chunk.file.length()} bytes), enqueuing upload.")
-        // No-op for admin-triggered recordings (no PendingRecordingStore
-        // entry exists for those) — only relevant for schedule-triggered
-        // ones, where it's what lets a post-kill resume continue numbering
-        // correctly (see RecordingSessionManager.resumeFromPending).
-        PendingRecordingStore(context).markChunkProduced(recordingId, chunk.chunkNumber)
-        ChunkUploadWorker.enqueue(
-            context = context,
-            recordingId = recordingId,
-            chunkNumber = chunk.chunkNumber,
-            file = chunk.file,
-            checksum = chunk.checksum,
-            durationSeconds = chunk.durationSeconds,
-            mimeType = chunk.mimeType,
-        )
-    }
+    /**
+     * Splits the whole-session recording into upload-sized parts and
+     * enqueues each one through [ChunkUploadWorker] (WorkManager-backed
+     * retry/backoff, so a flaky connection at stop time doesn't lose a
+     * part — it just delays /complete succeeding until the retry lands,
+     * same as the old per-chunk-at-stop-time behavior). The whole-session
+     * file itself is deleted once every part has been split out of it —
+     * only the parts persist on disk from here on.
+     */
+    private fun splitAndUpload(recordingId: String, recorded: ChunkingAudioRecorder.RecordedFile) {
+        val parts = try {
+            AdtsChunkSplitter.split(recorded.file, TARGET_PART_BYTES) { partNumber ->
+                ChunkFileStore.newChunkFile(context, partNumber)
+            }
+        } catch (e: Exception) {
+            AgentLog.e("session", "Failed to split recording $recordingId into upload parts", e)
+            runCatching { apiClient.reportError("SERVICE_ERROR", "Failed to split the recording for upload: ${e.message}", recordingId) }
+            return
+        } finally {
+            runCatching { recorded.file.delete() }
+        }
 
-    private fun uploadChunkNow(recordingId: String, chunk: ChunkingAudioRecorder.ChunkFile) {
-        runCatching {
-            apiClient.uploadChunk(recordingId, chunk.chunkNumber, chunk.checksum, chunk.durationSeconds, chunk.file, chunk.mimeType)
-            AgentLog.i("session", "Final chunk #${chunk.chunkNumber} uploaded synchronously before completion request.")
-            ChunkFileStore.delete(chunk.file)
-        }.onFailure { error ->
-            AgentLog.w("session", "Synchronous upload of final chunk #${chunk.chunkNumber} failed; falling back to WorkManager retry.", error)
-            // Still hand it to WorkManager so the chunk isn't lost — /complete
-            // will fail this time, but the dashboard can retry it once this
-            // background upload eventually succeeds.
+        AgentLog.i("session", "Recording $recordingId split into ${parts.size} part(s); enqueuing uploads.")
+        for (part in parts) {
+            PendingRecordingStore(context).markChunkProduced(recordingId, part.partNumber)
             ChunkUploadWorker.enqueue(
                 context = context,
                 recordingId = recordingId,
-                chunkNumber = chunk.chunkNumber,
-                file = chunk.file,
-                checksum = chunk.checksum,
-                durationSeconds = chunk.durationSeconds,
-                mimeType = chunk.mimeType,
+                chunkNumber = part.partNumber,
+                file = part.file,
+                checksum = part.checksum,
+                durationSeconds = 0, // not meaningful per-part with byte-based splitting; server derives true duration from start/stop timestamps
+                mimeType = "audio/aac",
             )
         }
     }
@@ -435,8 +351,8 @@ class RecordingSessionManager(
     @Synchronized
     private fun onRecordingError(command: Command, error: Throwable) {
         AgentLog.e("session", "Recording error for ${command.recordingId}", error)
-        // Runs on the recorder's own capture/encode thread — @Synchronized
-        // for the same reason as onScheduledRecordingError.
+        // Runs on the recorder's own capture thread — @Synchronized for the
+        // same reason as onScheduledRecordingError.
         if (activeRecordingId != command.recordingId) return // already superseded
 
         recorder = null

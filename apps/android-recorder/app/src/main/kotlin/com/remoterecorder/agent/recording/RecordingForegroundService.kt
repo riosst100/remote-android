@@ -20,7 +20,6 @@ import com.remoterecorder.agent.network.ReverbSocketClient
 import com.remoterecorder.agent.util.AgentLog
 import com.remoterecorder.agent.util.DeviceCredentialStore
 import com.remoterecorder.agent.util.PendingRecordingStore
-import com.remoterecorder.agent.util.ScheduleStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,53 +66,24 @@ class RecordingForegroundService : Service() {
 
     /**
      * Detects a schedule-triggered recording that was still capturing (per
-     * PendingRecordingStore) when the process was last killed — sessionManager
-     * itself has no memory of it (it's a fresh in-memory object at this
-     * point, same as `state == IDLE`) since MediaRecorder cannot survive a
-     * process death. Only ever finds at most one entry in practice (a
-     * device runs one recording at a time), but loops defensively in case
-     * of prior inconsistent state.
+     * PendingRecordingStore) when the process was last killed —
+     * sessionManager itself has no memory of it (it's a fresh in-memory
+     * object at this point, same as `state == IDLE`).
      *
-     * If the recording's scheduled stop time has already passed by the time
-     * we get here, it's stopped immediately instead of resumed — recording
-     * indefinitely past its schedule because the process happened to be
-     * killed is worse than a slightly-short recording.
+     * Unlike the old chunk-per-20s design, there's nothing to resume:
+     * MediaRecorder doesn't survive a process death, and the whole
+     * session now lives in one file that was still only partially written
+     * when the kill happened — none of it was uploaded yet, so none of it
+     * is salvageable. This just reports the loss so the recording isn't
+     * left dangling in RECORDING state forever. Only ever finds at most
+     * one entry in practice (a device runs one recording at a time), but
+     * loops defensively in case of prior inconsistent state.
      */
     private fun resumeUnfinishedScheduleRecording() {
         val store = PendingRecordingStore(this)
-        val schedules = ScheduleStore(this).getAll()
 
         for (pending in store.getUnfinished()) {
-            val schedule = schedules.find { it.id == pending.scheduleId }
-            if (schedule == null) {
-                // Schedule was deleted/disabled since this recording started,
-                // or is missing for any other reason — nothing tells us how
-                // long it should still run, so the safe choice is to close
-                // it out rather than record with no known end time.
-                AgentLog.w("service", "Resuming ${pending.localId}: its schedule is gone; stopping instead of resuming.")
-                sessionManager.resumeFromPending(pending)
-                sessionManager.stopFromSchedule(pending.localId)
-                continue
-            }
-
-            val stopAtMillis = pending.startedAtEpochMillis + schedule.durationMinutes * 60_000L
-            if (System.currentTimeMillis() >= stopAtMillis) {
-                AgentLog.i("service", "Resuming ${pending.localId}: already past its scheduled stop time; stopping immediately.")
-                sessionManager.resumeFromPending(pending)
-                sessionManager.stopFromSchedule(pending.localId)
-                continue
-            }
-
-            if (sessionManager.resumeFromPending(pending)) {
-                ScheduleAlarmScheduler.armStopAlarm(this, pending.localId, stopAtMillis)
-            } else {
-                // Couldn't resume capture (e.g. mic permission revoked while
-                // the process was dead) — mark it finished so
-                // PendingRecordingSyncWorker can still register/complete
-                // whatever chunks were already uploaded, rather than leaving
-                // it stuck as "still recording" forever.
-                store.markFinishedRecording(pending.localId)
-            }
+            sessionManager.reportUnrecoverableAfterRestart(pending)
         }
     }
 

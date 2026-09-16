@@ -30,6 +30,16 @@ object ChunkFileStore {
 
     private fun fileName(chunkNumber: Int): String = "chunk-%05d.aac".format(chunkNumber)
 
+    /**
+     * The single whole-session file ChunkingAudioRecorder records into,
+     * before AdtsChunkSplitter cuts it into numbered upload parts (which
+     * live in the same directory via [newChunkFile] — the two never
+     * collide since this uses a distinct filename, not a chunk number).
+     */
+    fun recordingFile(context: Context): File {
+        return File(directory(context), "recording.aac")
+    }
+
     /** Deletes a chunk's temp file once the server has acknowledged the upload. */
     fun delete(file: File) {
         if (file.exists()) file.delete()
