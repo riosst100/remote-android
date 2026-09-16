@@ -43,7 +43,16 @@ class RecordingSessionManager(
         private set
 
     private companion object {
-        const val DEFAULT_CHUNK_TARGET_SECONDS = 20
+        // One file per recording rather than small rotating chunks (the old
+        // 20s rotation caused an audible gap at every boundary — see git
+        // history for the AudioRecord/MediaCodec approach that was tried and
+        // reverted, and PRE_WARM_LEAD_MILLIS in ChunkingAudioRecorder for the
+        // narrower gap that replaced it). 4 hours is a safety ceiling, not a
+        // real rotation interval — long enough that no normal recording ever
+        // hits it, short enough that a missed stop can't grow one file
+        // without bound.
+        const val DEFAULT_CHUNK_TARGET_SECONDS = 4 * 60 * 60
+        const val MAX_CHUNK_TARGET_SECONDS = 4 * 60 * 60
 
         /** One automatic retry for a failed start/session before reporting FAILED to the admin. */
         const val MAX_START_RETRIES = 1
@@ -313,7 +322,11 @@ class RecordingSessionManager(
     private fun beginAdminRecording(command: Command) {
         val requested = RecordingConfig.fromCommandPayload(command.payload)
         val resolved = CapabilityFallback.resolve(requested)
-        val chunkTargetSeconds = command.payload.optInt("chunk_target_seconds", 20).coerceIn(5, 60)
+        // Effectively "one file per recording" now (see DEFAULT_CHUNK_TARGET_SECONDS)
+        // rather than small rotating chunks — the upper bound is a safety
+        // net against an unbounded single file if a stop is somehow missed,
+        // not a real rotation interval.
+        val chunkTargetSeconds = command.payload.optInt("chunk_target_seconds", DEFAULT_CHUNK_TARGET_SECONDS).coerceIn(5, MAX_CHUNK_TARGET_SECONDS)
 
         val newRecorder = ChunkingAudioRecorder(
             context = context,

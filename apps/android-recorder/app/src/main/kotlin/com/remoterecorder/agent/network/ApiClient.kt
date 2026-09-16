@@ -27,7 +27,11 @@ class ApiClient(private val tokenProvider: () -> String?) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        // 10 minutes: a recording now uploads as one file after stop()
+        // rather than in small rotating chunks, so this has to cover a
+        // long session's entire (potentially 100+ MB) upload on a slow
+        // connection, not just a ~1MB 20-second chunk.
+        .writeTimeout(10, TimeUnit.MINUTES)
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
