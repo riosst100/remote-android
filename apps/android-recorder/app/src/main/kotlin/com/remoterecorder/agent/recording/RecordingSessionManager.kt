@@ -268,7 +268,7 @@ class RecordingSessionManager(
         if (activeRetryCount < MAX_START_RETRIES) {
             activeRetryCount++
             AgentLog.w("session", "Retrying scheduled recording start for $recordingId (attempt $activeRetryCount).")
-            beginScheduledRecording(recordingId, schedule, startedAt, resolved)
+            beginScheduledRecording(recordingId, schedule, startedAt, resolved, startingChunkNumber = 0)
             return
         }
 
