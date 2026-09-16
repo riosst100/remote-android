@@ -101,6 +101,23 @@ class ChunkingAudioRecorder(
             return
         }
 
+        mediaCodec.start()
+        record.startRecording()
+
+        // startRecording() doesn't throw on failure — it can silently leave
+        // the AudioRecord in RECORDSTATE_STOPPED (observed when another app
+        // or the system HAL already holds the mic). Left unchecked, the
+        // capture thread would then block forever on read() with zero
+        // chunks ever produced, only surfacing as a failure much later when
+        // stop() is eventually called — reported here immediately instead.
+        if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            runCatching { mediaCodec.stop() }
+            mediaCodec.release()
+            record.release()
+            onError(IllegalStateException("AudioRecord.startRecording() did not enter RECORDSTATE_RECORDING (mic likely unavailable)."))
+            return
+        }
+
         audioRecord = record
         codec = mediaCodec
         chunkNumber = 0
@@ -109,9 +126,6 @@ class ChunkingAudioRecorder(
 
         chunkWriter = ChunkWriter(context, config.encoder, ++chunkNumber).also { it.open() }
         chunkStartNanos = System.nanoTime()
-
-        mediaCodec.start()
-        record.startRecording()
 
         captureThread = thread(name = "audio-capture") { captureLoop(record, bufferSize) }
         encoderThread = thread(name = "audio-encode") { encodeLoop(mediaCodec, mimeType) }
@@ -126,14 +140,27 @@ class ChunkingAudioRecorder(
         if (!isRecording) return null
         stopRequested = true
 
-        // Wake the capture loop immediately rather than waiting for it to
-        // notice stopRequested on its next read cycle.
+        // AudioRecord.read() blocks until data is available; setting
+        // stopRequested alone doesn't wake a thread parked inside a
+        // blocking read call. record.stop() does unblock it (read()
+        // returns ERROR_INVALID_OPERATION once the record is stopped),
+        // which is what lets captureLoop's finally block push the
+        // end-of-stream sentinel that the encoder loop is waiting on.
+        audioRecord?.let { runCatching { it.stop() } }
+
         captureThread?.join(5_000)
         encoderThread?.join(5_000)
 
         isRecording = false
         audioRecord?.let { runCatching { it.release() } }
-        codec?.let { runCatching { it.stop() }; runCatching { it.release() } }
+        // Only stop/release the codec once the encoder thread has actually
+        // finished with it — releasing out from under a still-running
+        // encoderLoop iteration throws IllegalStateException on the
+        // encoder thread, which used to get misreported as a recording
+        // failure even though real audio had already been captured.
+        if (encoderThread?.isAlive != true) {
+            codec?.let { runCatching { it.stop() }; runCatching { it.release() } }
+        }
         audioRecord = null
         codec = null
 
@@ -155,7 +182,10 @@ class ChunkingAudioRecorder(
             }
         } catch (e: Exception) {
             AgentLog.e("recorder", "Audio capture loop failed", e)
-            onError(e)
+            // A stop-in-progress makes record.read() throw as a normal,
+            // expected consequence of record.stop() unblocking it — not a
+            // real recording failure, so it shouldn't be reported as one.
+            if (!stopRequested) onError(e)
         } finally {
             runCatching { record.stop() }
             pcmQueue.put(PcmBuffer(ByteArray(0), 0, endOfStream = true))
@@ -200,7 +230,7 @@ class ChunkingAudioRecorder(
             }
         } catch (e: Exception) {
             AgentLog.e("recorder", "Audio encode loop failed", e)
-            onError(e)
+            if (!stopRequested) onError(e)
         } finally {
             finishActiveChunk()
         }

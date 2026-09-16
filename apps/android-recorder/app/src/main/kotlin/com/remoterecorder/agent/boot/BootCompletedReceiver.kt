@@ -10,6 +10,7 @@ import com.remoterecorder.agent.util.DeviceCredentialStore
 import com.remoterecorder.agent.util.ScheduleStore
 import com.remoterecorder.agent.work.HeartbeatWorker
 import com.remoterecorder.agent.work.PendingRecordingSyncWorker
+import com.remoterecorder.agent.work.ScheduleFallbackPollWorker
 import com.remoterecorder.agent.work.ScheduleSyncWorker
 
 /**
@@ -49,6 +50,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
         val schedules = ScheduleStore(context).getAll()
         ScheduleAlarmScheduler.rearmNext(context, schedules)
         ScheduleSyncWorker.schedule(context) // re-affirm periodic sync survives reboot; idempotent (KEEP policy)
+        ScheduleFallbackPollWorker.schedule(context) // same: re-affirm, idempotent (KEEP policy)
         PendingRecordingSyncWorker.schedule(context)
     }
 }
