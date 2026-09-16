@@ -56,6 +56,11 @@ class ChunkUploadWorker(appContext: Context, params: WorkerParameters) : Corouti
             client.uploadChunk(recordingId, chunkNumber, checksum, duration, file, mimeType)
             AgentLog.i("upload", "Chunk #$chunkNumber uploaded for recording $recordingId.")
             ChunkFileStore.delete(file)
+            // This part may have been the one /complete was waiting on (see
+            // RecordingSessionManager.splitAndUpload) — nudge an immediate
+            // retry rather than waiting for RecordingCompletionSyncWorker's
+            // next periodic tick, which could be up to 15 minutes away.
+            RecordingCompletionSyncWorker.runNow(applicationContext)
             Result.success()
         } catch (e: ApiException) {
             if (isClientError(e)) {

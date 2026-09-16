@@ -22,6 +22,7 @@ import com.remoterecorder.agent.recording.RecordingForegroundService
 import com.remoterecorder.agent.util.DeviceCredentialStore
 import com.remoterecorder.agent.work.HeartbeatWorker
 import com.remoterecorder.agent.work.PendingRecordingSyncWorker
+import com.remoterecorder.agent.work.RecordingCompletionSyncWorker
 import com.remoterecorder.agent.work.ScheduleFallbackPollWorker
 import com.remoterecorder.agent.work.ScheduleSyncWorker
 import kotlinx.coroutines.Dispatchers
@@ -107,6 +108,7 @@ class SetupActivity : AppCompatActivity() {
             ScheduleSyncWorker.schedule(this)
             ScheduleFallbackPollWorker.schedule(this)
             PendingRecordingSyncWorker.schedule(this)
+            RecordingCompletionSyncWorker.schedule(this)
         }
     }
 

@@ -13,7 +13,9 @@ import com.remoterecorder.agent.network.ApiClient
 import com.remoterecorder.agent.util.AgentLog
 import com.remoterecorder.agent.util.PendingRecording
 import com.remoterecorder.agent.util.PendingRecordingStore
+import com.remoterecorder.agent.util.RecordingCompletionStore
 import com.remoterecorder.agent.work.ChunkUploadWorker
+import com.remoterecorder.agent.work.RecordingCompletionSyncWorker
 import org.json.JSONObject
 import java.time.Instant
 import java.util.UUID
@@ -33,9 +35,9 @@ import java.util.UUID
  * were already uploaded) for gaplessness: a device crash or kill now
  * loses the entire in-progress recording, since nothing is split or
  * uploaded until the session ends. Accepted trade-off — see
- * [resumeFromPending], which now only reports the loss rather than
- * actually resuming capture, since there is no longer a partial file to
- * pick back up from.
+ * [reportUnrecoverableAfterRestart], which now only reports the loss
+ * rather than actually resuming capture, since there is no longer a
+ * partial file to pick back up from.
  */
 class RecordingSessionManager(
     private val context: Context,
@@ -57,8 +59,8 @@ class RecordingSessionManager(
         /** One automatic retry for a failed start before reporting FAILED to the admin. */
         const val MAX_START_RETRIES = 1
 
-        /** Split the whole-session recording into ~5-minute upload parts. */
-        const val TARGET_PART_BYTES = 5L * 60 * 32_000 // ~5 min at a 256kbps-class bitrate, rounded generously
+        /** Split the whole-session recording into ~2-minute upload parts. */
+        const val TARGET_PART_BYTES = 2L * 60 * 32_000 // ~2 min at a 256kbps-class bitrate, rounded generously
     }
 
     fun handleCommand(command: Command) {
@@ -165,13 +167,25 @@ class RecordingSessionManager(
         state = State.STOPPING
         val recorded = recorder?.stop()
         recorder = null
-        if (recorded != null) splitAndUpload(recordingId, recorded)
+        val allPartsUploaded = if (recorded != null) splitAndUpload(recordingId, recorded) else false
 
+        // markFinishedRecording alone is enough here, regardless of
+        // allPartsUploaded — PendingRecordingSyncWorker already retries
+        // /complete for any (finished && !completed) entry on its own
+        // periodic schedule, which covers the "a part fell back to
+        // ChunkUploadWorker" case the same way RecordingCompletionStore
+        // does for the admin-triggered path (that path has no
+        // PendingRecordingStore entry to lean on instead).
         val store = PendingRecordingStore(context)
         store.markFinishedRecording(recordingId)
-        runCatching { apiClient.completeRecording(recordingId) }
-            .onSuccess { store.markCompleted(recordingId) }
-            .onFailure { AgentLog.w("session", "Complete request failed for $recordingId; PendingRecordingSyncWorker will retry.", it) }
+
+        if (allPartsUploaded) {
+            runCatching { apiClient.completeRecording(recordingId) }
+                .onSuccess { store.markCompleted(recordingId) }
+                .onFailure { AgentLog.w("session", "Complete request failed for $recordingId; PendingRecordingSyncWorker will retry.", it) }
+        } else {
+            AgentLog.w("session", "Deferring /complete for $recordingId until the remaining part(s) finish uploading in the background; PendingRecordingSyncWorker will retry.")
+        }
 
         state = State.IDLE
         activeRecordingId = null
@@ -292,18 +306,12 @@ class RecordingSessionManager(
 
         val recorded = recorder?.stop()
         recorder = null
+        val recordingId = activeRecordingId ?: command.recordingId
 
-        if (recorded != null) {
-            splitAndUpload(activeRecordingId ?: command.recordingId, recorded)
-        }
+        val allPartsUploaded = if (recorded != null) splitAndUpload(recordingId, recorded) else false
 
-        val recordingId = activeRecordingId
         acknowledge(command.commandId, "recording_stopped")
-
-        if (recordingId != null) {
-            runCatching { apiClient.completeRecording(recordingId) }
-                .onFailure { AgentLog.e("session", "Failed to request finalization for $recordingId; server can retry via dashboard.", it) }
-        }
+        completeOrDefer(recordingId, allPartsUploaded)
 
         state = State.IDLE
         activeRecordingId = null
@@ -312,15 +320,48 @@ class RecordingSessionManager(
     }
 
     /**
-     * Splits the whole-session recording into upload-sized parts and
-     * enqueues each one through [ChunkUploadWorker] (WorkManager-backed
-     * retry/backoff, so a flaky connection at stop time doesn't lose a
-     * part — it just delays /complete succeeding until the retry lands,
-     * same as the old per-chunk-at-stop-time behavior). The whole-session
-     * file itself is deleted once every part has been split out of it —
-     * only the parts persist on disk from here on.
+     * Calls `/complete` now if every part actually finished uploading, or
+     * defers it to [RecordingCompletionSyncWorker] otherwise — calling
+     * /complete before every part has landed server-side fails
+     * finalization outright (see [splitAndUpload]).
      */
-    private fun splitAndUpload(recordingId: String, recorded: ChunkingAudioRecorder.RecordedFile) {
+    private fun completeOrDefer(recordingId: String, allPartsUploaded: Boolean) {
+        if (!allPartsUploaded) {
+            AgentLog.w("session", "Deferring /complete for $recordingId until the remaining part(s) finish uploading in the background.")
+            RecordingCompletionStore(context).markPending(recordingId)
+            return
+        }
+
+        runCatching { apiClient.completeRecording(recordingId) }
+            .onFailure {
+                AgentLog.e("session", "Failed to request finalization for $recordingId; will retry.", it)
+                RecordingCompletionStore(context).markPending(recordingId)
+            }
+    }
+
+    /**
+     * Splits the whole-session recording into upload-sized parts and
+     * uploads each one *synchronously, in order*, blocking the caller
+     * (STOPPING already gates the state machine, so this is safe to take
+     * a few seconds). This matters because /complete must never be called
+     * before every part has actually landed server-side — finalization
+     * requires a contiguous, complete chunk sequence and fails outright
+     * ("no chunks were uploaded", or a sequence gap) otherwise. Enqueuing
+     * parts to WorkManager and calling /complete right after used to race
+     * that background upload, since WorkManager runs asynchronously.
+     *
+     * Returns true only if every part uploaded successfully — the caller
+     * uses this to decide whether it's actually safe to call /complete
+     * now, or whether to defer to [RecordingCompletionStore] +
+     * [RecordingCompletionSyncWorker] instead. A part that fails here
+     * still falls back to ChunkUploadWorker (WorkManager retry/backoff),
+     * so a flaky connection at stop time never loses a part — it just
+     * means /complete has to wait for that background retry to land.
+     *
+     * The whole-session file itself is deleted once every part has been
+     * split out of it — only the parts persist on disk from here on.
+     */
+    private fun splitAndUpload(recordingId: String, recorded: ChunkingAudioRecorder.RecordedFile): Boolean {
         val parts = try {
             AdtsChunkSplitter.split(recorded.file, TARGET_PART_BYTES) { partNumber ->
                 ChunkFileStore.newChunkFile(context, partNumber)
@@ -328,24 +369,45 @@ class RecordingSessionManager(
         } catch (e: Exception) {
             AgentLog.e("session", "Failed to split recording $recordingId into upload parts", e)
             runCatching { apiClient.reportError("SERVICE_ERROR", "Failed to split the recording for upload: ${e.message}", recordingId) }
-            return
+            return false
         } finally {
             runCatching { recorded.file.delete() }
         }
 
-        AgentLog.i("session", "Recording $recordingId split into ${parts.size} part(s); enqueuing uploads.")
+        if (parts.isEmpty()) {
+            AgentLog.w("session", "Recording $recordingId produced no audio to split.")
+            return false
+        }
+
+        AgentLog.i("session", "Recording $recordingId split into ${parts.size} part(s); uploading synchronously.")
+        var allSucceeded = true
         for (part in parts) {
             PendingRecordingStore(context).markChunkProduced(recordingId, part.partNumber)
-            ChunkUploadWorker.enqueue(
-                context = context,
-                recordingId = recordingId,
-                chunkNumber = part.partNumber,
-                file = part.file,
-                checksum = part.checksum,
-                durationSeconds = 0, // not meaningful per-part with byte-based splitting; server derives true duration from start/stop timestamps
-                mimeType = "audio/aac",
-            )
+
+            val uploaded = runCatching {
+                apiClient.uploadChunk(recordingId, part.partNumber, part.checksum, 0, part.file, "audio/aac")
+            }
+            if (uploaded.isSuccess) {
+                ChunkFileStore.delete(part.file)
+            } else {
+                allSucceeded = false
+                AgentLog.w("session", "Synchronous upload of part #${part.partNumber} failed; falling back to WorkManager retry.", uploaded.exceptionOrNull())
+                // Still hand it to WorkManager so the part isn't lost — /complete
+                // will be deferred to RecordingCompletionSyncWorker once this
+                // background upload eventually succeeds.
+                ChunkUploadWorker.enqueue(
+                    context = context,
+                    recordingId = recordingId,
+                    chunkNumber = part.partNumber,
+                    file = part.file,
+                    checksum = part.checksum,
+                    durationSeconds = 0,
+                    mimeType = "audio/aac",
+                )
+            }
         }
+
+        return allSucceeded
     }
 
     @Synchronized
