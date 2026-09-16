@@ -2,9 +2,7 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\RecordingPreset;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class StoreRecordingScheduleRequest extends FormRequest
 {
@@ -18,7 +16,8 @@ class StoreRecordingScheduleRequest extends FormRequest
         return [
             'day_of_week' => ['required', 'integer', 'between:0,6'],
             'time_of_day' => ['required', 'date_format:H:i'],
-            'preset' => ['required', 'string', Rule::enum(RecordingPreset::class)],
+            // LOSSLESS excluded — see DeviceDashboardController::selectablePresets.
+            'preset' => ['required', 'string', 'in:LOW,MEDIUM,HIGH'],
             'duration_minutes' => ['required', 'integer', 'min:1', 'max:480'],
         ];
     }

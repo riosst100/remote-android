@@ -2,9 +2,7 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\RecordingPreset;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class StartRecordingRequest extends FormRequest
 {
@@ -17,7 +15,11 @@ class StartRecordingRequest extends FormRequest
     {
         return [
             'device_id' => ['required', 'integer', 'exists:devices,id'],
-            'preset' => ['required', 'string', Rule::enum(RecordingPreset::class)],
+            // LOSSLESS is intentionally excluded here: the Android agent's
+            // recorder only implements the AAC path today, so accepting it
+            // would silently fall back to AAC rather than actually
+            // recording lossless.
+            'preset' => ['required', 'string', 'in:LOW,MEDIUM,HIGH'],
         ];
     }
 }

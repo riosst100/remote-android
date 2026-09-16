@@ -62,7 +62,7 @@ class DeviceDashboardTest extends TestCase
         $response->assertSee('HIGH — AAC 44.1kHz/192kbps', escape: false);
     }
 
-    public function test_devices_index_includes_lossless_in_selectable_presets(): void
+    public function test_devices_index_excludes_lossless_from_selectable_presets(): void
     {
         $this->actingAs(User::factory()->create());
 
@@ -71,7 +71,7 @@ class DeviceDashboardTest extends TestCase
         $response = $this->get('/devices');
 
         $response->assertOk();
-        $response->assertSee('LOSSLESS');
+        $response->assertDontSee('LOSSLESS');
     }
 
     public function test_devices_index_exposes_the_started_at_timestamp_for_a_live_recording(): void

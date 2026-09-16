@@ -54,7 +54,13 @@ class DeviceDashboardController extends Controller
      */
     private function selectablePresets(): array
     {
-        return RecordingPreset::cases();
+        // LOSSLESS is excluded: the Android agent's recorder only
+        // implements the AAC (MediaRecorder) path — a continuous
+        // AudioRecord/MediaCodec pipeline that could actually produce FLAC
+        // was tried and reverted after proving too OEM-sensitive (silent
+        // zero-output on Samsung, stop()-time races on Xiaomi). Offering
+        // LOSSLESS here would silently record AAC instead.
+        return array_filter(RecordingPreset::cases(), fn (RecordingPreset $preset) => $preset !== RecordingPreset::LOSSLESS);
     }
 
     /**
