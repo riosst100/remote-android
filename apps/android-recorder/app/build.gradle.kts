@@ -22,8 +22,8 @@ android {
         applicationId = "com.remoterecorder.agent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.2.0"
+        versionCode = 6
+        versionName = "1.2.1"
 
         // Production server: Nginx terminates TLS on 443 and reverse-proxies
         // /app to Reverb's internal port 8080 (see backend/laravel's Nginx
