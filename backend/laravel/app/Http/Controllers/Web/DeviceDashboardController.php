@@ -54,10 +54,7 @@ class DeviceDashboardController extends Controller
      */
     private function selectablePresets(): array
     {
-        // LOSSLESS is excluded: the Android agent's recorder only
-        // implements the AAC path today, so offering it would silently
-        // fall back to AAC rather than actually recording lossless.
-        return array_filter(RecordingPreset::cases(), fn (RecordingPreset $preset) => $preset !== RecordingPreset::LOSSLESS);
+        return RecordingPreset::cases();
     }
 
     /**

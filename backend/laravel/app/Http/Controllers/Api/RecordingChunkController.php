@@ -29,6 +29,7 @@ class RecordingChunkController extends Controller
                 $request->validated('chunk_number'),
                 $request->validated('checksum'),
                 $request->validated('duration'),
+                $request->validated('mime_type'),
             );
         } catch (ChecksumMismatchException $e) {
             return response()->json(['message' => $e->getMessage(), 'error' => 'UPLOAD_ERROR'], 422);

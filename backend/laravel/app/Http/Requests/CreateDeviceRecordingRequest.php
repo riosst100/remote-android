@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\RecordingPreset;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class CreateDeviceRecordingRequest extends FormRequest
 {
@@ -14,8 +16,7 @@ class CreateDeviceRecordingRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // LOSSLESS excluded, matches StoreRecordingScheduleRequest.
-            'preset' => ['required', 'string', 'in:LOW,MEDIUM,HIGH'],
+            'preset' => ['required', 'string', Rule::enum(RecordingPreset::class)],
             'client_recording_id' => ['required', 'uuid'],
             'encoder' => ['nullable', 'string'],
             'sample_rate' => ['nullable', 'integer'],

@@ -67,7 +67,7 @@ object CapabilityFallback {
             AudioEncoder.FLAC -> "audio/flac"
         }
 
-        if (encoder == AudioEncoder.AAC) return true // MediaRecorder AAC path always available
+        if (encoder == AudioEncoder.AAC) return true // MediaCodec's AAC encoder is present on every real device
 
         val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
         return codecList.codecInfos.any { info: MediaCodecInfo ->

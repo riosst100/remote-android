@@ -37,12 +37,16 @@ class RecordingSessionManager(
     private var activeRecordingId: String? = null
     private var activeCommandId: String? = null
     private var activeSource: Source = Source.NONE
+    private var activeRetryCount: Int = 0
 
     @Volatile var state: State = State.IDLE
         private set
 
-    companion object {
-        private const val DEFAULT_CHUNK_TARGET_SECONDS = 20
+    private companion object {
+        const val DEFAULT_CHUNK_TARGET_SECONDS = 20
+
+        /** One automatic retry for a failed start/session before reporting FAILED to the admin. */
+        const val MAX_START_RETRIES = 1
     }
 
     fun handleCommand(command: Command) {
@@ -83,12 +87,38 @@ class RecordingSessionManager(
         val startedAt = Instant.now()
         val resolved = CapabilityFallback.resolve(RecordingConfig.fromPreset(schedule.preset))
 
-        beginCapture(localRecordingId, resolved, startingChunkNumber = 0)
+        activeRetryCount = 0
+        beginScheduledRecording(localRecordingId, schedule, startedAt, resolved, startingChunkNumber = 0)
+
+        return localRecordingId
+    }
+
+    /**
+     * Builds and starts the recorder for a fresh schedule-triggered
+     * session. Split out from [startFromSchedule] so
+     * [onScheduledRecordingError] can call it again for a
+     * same-recording-id retry without re-registering a new id with the
+     * server or re-running the idle/permission checks. A post-process-kill
+     * resume goes through [beginCapture] instead — see [resumeFromPending].
+     */
+    private fun beginScheduledRecording(localRecordingId: String, schedule: DeviceSchedule, startedAt: Instant, resolved: RecordingConfig, startingChunkNumber: Int) {
+        val newRecorder = ChunkingAudioRecorder(
+            context = context,
+            config = resolved,
+            chunkTargetSeconds = DEFAULT_CHUNK_TARGET_SECONDS,
+            onChunkReady = { chunk -> onChunkReady(localRecordingId, chunk) },
+            onError = { onScheduledRecordingError(localRecordingId, schedule, startedAt, resolved, it) },
+        )
+
+        activeRecordingId = localRecordingId
+        activeCommandId = null // no server command backs this
+        activeSource = Source.SCHEDULE_DEVICE
+        state = State.RECORDING
+        recorder = newRecorder
+        newRecorder.start(startingChunkNumber)
 
         PendingRecordingStore(context).markStarted(localRecordingId, schedule, startedAt, resolved)
         tryRegisterNow(localRecordingId, schedule, startedAt, resolved)
-
-        return localRecordingId
     }
 
     /**
@@ -125,17 +155,26 @@ class RecordingSessionManager(
         )
 
         AgentLog.i("session", "Resuming recording ${pending.localId} from chunk #${pending.lastChunkNumber + 1} after process restart.")
+        activeRetryCount = 0
         beginCapture(pending.localId, config, startingChunkNumber = pending.lastChunkNumber)
         return true
     }
 
+    /**
+     * Builds and starts the recorder for a resumed-after-kill session.
+     * Unlike [beginScheduledRecording], this never re-registers or
+     * re-marks-started with [PendingRecordingStore] — `pending` already
+     * exists from the original startFromSchedule call, and re-touching it
+     * here would reset bookkeeping (like lastChunkNumber) that the resume
+     * itself depends on reading.
+     */
     private fun beginCapture(recordingId: String, config: RecordingConfig, startingChunkNumber: Int) {
         val newRecorder = ChunkingAudioRecorder(
             context = context,
             config = config,
             chunkTargetSeconds = DEFAULT_CHUNK_TARGET_SECONDS,
             onChunkReady = { chunk -> onChunkReady(recordingId, chunk) },
-            onError = { onScheduledRecordingError(recordingId, it) },
+            onError = { onResumedRecordingError(recordingId, config, startingChunkNumber, it) },
         )
 
         activeRecordingId = recordingId
@@ -144,6 +183,26 @@ class RecordingSessionManager(
         state = State.RECORDING
         recorder = newRecorder
         newRecorder.start(startingChunkNumber)
+    }
+
+    @Synchronized
+    private fun onResumedRecordingError(recordingId: String, config: RecordingConfig, startingChunkNumber: Int, error: Throwable) {
+        AgentLog.e("session", "Resumed recording error for $recordingId", error)
+        if (activeRecordingId != recordingId) return // already superseded by a newer session
+
+        recorder = null
+
+        if (activeRetryCount < MAX_START_RETRIES) {
+            activeRetryCount++
+            AgentLog.w("session", "Retrying resumed recording start for $recordingId (attempt $activeRetryCount).")
+            beginCapture(recordingId, config, startingChunkNumber)
+            return
+        }
+
+        state = State.IDLE
+        activeRecordingId = null
+        activeSource = Source.NONE
+        activeRetryCount = 0
     }
 
     /**
@@ -194,12 +253,29 @@ class RecordingSessionManager(
         }
     }
 
-    private fun onScheduledRecordingError(recordingId: String, error: Throwable) {
+    @Synchronized
+    private fun onScheduledRecordingError(recordingId: String, schedule: DeviceSchedule, startedAt: Instant, resolved: RecordingConfig, error: Throwable) {
         AgentLog.e("session", "Scheduled recording error for $recordingId", error)
-        state = State.IDLE
+        // The recorder's onError callback runs on its own capture/encode
+        // thread, not the thread that called startFromSchedule — without
+        // @Synchronized this races handleStart/handleStop/stopFromSchedule
+        // mutating the same state/recorder/activeRecordingId fields from
+        // whatever thread the WebSocket or alarm receiver runs on.
+        if (activeRecordingId != recordingId) return // already superseded by a newer session
+
         recorder = null
+
+        if (activeRetryCount < MAX_START_RETRIES) {
+            activeRetryCount++
+            AgentLog.w("session", "Retrying scheduled recording start for $recordingId (attempt $activeRetryCount).")
+            beginScheduledRecording(recordingId, schedule, startedAt, resolved)
+            return
+        }
+
+        state = State.IDLE
         activeRecordingId = null
         activeSource = Source.NONE
+        activeRetryCount = 0
     }
 
     @Synchronized
@@ -223,6 +299,18 @@ class RecordingSessionManager(
             return
         }
 
+        activeRetryCount = 0
+        beginAdminRecording(command)
+    }
+
+    /**
+     * Builds and starts the recorder for an admin-triggered session. Split
+     * out from [handleStart] so [onRecordingError] can call it again for a
+     * same-command retry without re-running the idle/permission checks
+     * (which don't need re-checking — state is already RECORDING/retrying,
+     * and permission can't have been revoked between the two attempts).
+     */
+    private fun beginAdminRecording(command: Command) {
         val requested = RecordingConfig.fromCommandPayload(command.payload)
         val resolved = CapabilityFallback.resolve(requested)
         val chunkTargetSeconds = command.payload.optInt("chunk_target_seconds", 20).coerceIn(5, 60)
@@ -331,16 +419,30 @@ class RecordingSessionManager(
         }
     }
 
+    @Synchronized
     private fun onRecordingError(command: Command, error: Throwable) {
         AgentLog.e("session", "Recording error for ${command.recordingId}", error)
+        // Runs on the recorder's own capture/encode thread — @Synchronized
+        // for the same reason as onScheduledRecordingError.
+        if (activeRecordingId != command.recordingId) return // already superseded
+
+        recorder = null
+
+        if (activeRetryCount < MAX_START_RETRIES) {
+            activeRetryCount++
+            AgentLog.w("session", "Retrying recording start for ${command.recordingId} (attempt $activeRetryCount).")
+            beginAdminRecording(command)
+            return
+        }
+
         acknowledge(command.commandId, "recording_error", errorCode = ErrorCode.SERVICE_ERROR.name, errorMessage = error.message)
         reportError(ErrorCode.SERVICE_ERROR, error.message, command.recordingId)
 
         state = State.IDLE
-        recorder = null
         activeRecordingId = null
         activeCommandId = null
         activeSource = Source.NONE
+        activeRetryCount = 0
     }
 
     private fun acknowledgeStarted(commandId: String, config: RecordingConfig? = null) {

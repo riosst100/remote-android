@@ -23,7 +23,7 @@ class ChunkUploadService
      *
      * @throws ChecksumMismatchException
      */
-    public function store(Recording $recording, UploadedFile $file, int $chunkNumber, string $checksum, ?int $duration): RecordingChunk
+    public function store(Recording $recording, UploadedFile $file, int $chunkNumber, string $checksum, ?int $duration, ?string $declaredMimeType = null): RecordingChunk
     {
         $actualChecksum = hash_file('sha256', $file->getRealPath());
 
@@ -31,7 +31,7 @@ class ChunkUploadService
             throw new ChecksumMismatchException("Checksum mismatch for chunk {$chunkNumber}.");
         }
 
-        return DB::transaction(function () use ($recording, $file, $chunkNumber, $checksum, $duration) {
+        return DB::transaction(function () use ($recording, $file, $chunkNumber, $checksum, $duration, $declaredMimeType) {
             $existing = RecordingChunk::query()
                 ->where('recording_id', $recording->id)
                 ->where('chunk_number', $chunkNumber)
@@ -55,7 +55,11 @@ class ChunkUploadService
                 'size' => Storage::disk($disk)->size($storedPath),
                 'checksum' => $checksum,
                 'duration' => $duration,
-                'mime_type' => $file->getMimeType() ?? 'application/octet-stream',
+                // Trust what the device declares it encoded over sniffing the
+                // file's bytes: FLAC and AAC-ADTS frame sync codes are similar
+                // enough that content-based detection (Symfony/finfo) has
+                // misidentified real FLAC chunks as AAC-ADTS in practice.
+                'mime_type' => $declaredMimeType ?? $file->getMimeType() ?? 'application/octet-stream',
                 'uploaded_at' => now(),
             ]);
 
