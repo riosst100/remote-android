@@ -9,14 +9,6 @@ return [
     // Swap to 's3'/'r2'/'minio' later without touching finalization logic.
     'storage_disk' => env('RECORDER_STORAGE_DISK', 'recordings'),
 
-    // Target duration, in seconds, the Android agent should aim for per
-    // chunk. Effectively "one file per recording" now — a small value here
-    // used to force a MediaRecorder restart every few seconds, which
-    // produced an audible gap at each boundary. 4 hours is a safety
-    // ceiling (matches RecordingSessionManager.MAX_CHUNK_TARGET_SECONDS on
-    // the Android side), not a real rotation interval.
-    'chunk_target_seconds' => env('RECORDER_CHUNK_SECONDS', 4 * 60 * 60),
-
     // How long a device authentication token remains valid before rotation is recommended.
     'device_token_ttl_days' => env('RECORDER_DEVICE_TOKEN_TTL_DAYS', 365),
 

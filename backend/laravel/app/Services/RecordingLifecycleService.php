@@ -75,7 +75,6 @@ class RecordingLifecycleService
                     'sample_rate' => $target['sample_rate'],
                     'bitrate' => $target['bitrate'],
                     'channels' => $target['channels'],
-                    'chunk_target_seconds' => config('recorder.chunk_target_seconds'),
                 ],
                 'status' => CommandStatus::SENT,
                 'sent_at' => now(),
