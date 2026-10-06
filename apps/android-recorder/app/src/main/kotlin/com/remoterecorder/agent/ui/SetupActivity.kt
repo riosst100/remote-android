@@ -71,6 +71,10 @@ class SetupActivity : AppCompatActivity() {
             requestExactAlarmPermission()
         }
 
+        findViewById<Button>(R.id.overlayButton).setOnClickListener {
+            requestOverlayPermission()
+        }
+
         refreshStatus()
     }
 
@@ -116,7 +120,26 @@ class SetupActivity : AppCompatActivity() {
         val micStatus = if (hasMicPermission()) "granted" else "NOT granted"
         val regStatus = if (credentials.isRegistered()) "registered (device id ${credentials.serverDeviceId})" else "not registered"
         val alarmStatus = if (canScheduleExactAlarms()) "granted" else "NOT granted"
-        statusText.text = "Microphone permission: $micStatus\nServer registration: $regStatus\nExact alarm scheduling: $alarmStatus"
+        val overlayStatus = if (Settings.canDrawOverlays(this)) "granted" else "NOT granted"
+        statusText.text = "Microphone permission: $micStatus\nServer registration: $regStatus\nExact alarm scheduling: $alarmStatus\nDisplay over other apps: $overlayStatus"
+    }
+
+    /**
+     * Opens the system "Display over other apps" settings page for this app.
+     * The overlay (SYSTEM_ALERT_WINDOW) permission is what lets a remote
+     * SHOW_ALERT pop the full-screen alert over whatever app is in the
+     * foreground; without it the alert still shows via a full-screen-intent
+     * notification, but only reliably when the screen is locked/off.
+     */
+    private fun requestOverlayPermission() {
+        if (Settings.canDrawOverlays(this)) {
+            statusText.text = "Display over other apps already granted."
+            return
+        }
+        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivity(intent)
     }
 
     private fun hasMicPermission(): Boolean {

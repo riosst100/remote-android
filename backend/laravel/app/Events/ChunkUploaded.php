@@ -4,11 +4,11 @@ namespace App\Events;
 
 use App\Events\Concerns\BroadcastsToAdminAndRecording;
 use App\Models\RecordingChunk;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class ChunkUploaded implements ShouldBroadcast
+class ChunkUploaded implements ShouldBroadcastNow
 {
     use BroadcastsToAdminAndRecording, Dispatchable, SerializesModels;
 

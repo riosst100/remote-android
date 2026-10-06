@@ -67,6 +67,10 @@ class RecordingSessionManager(
         when (command.type) {
             CommandType.START_RECORDING -> handleStart(command)
             CommandType.STOP_RECORDING -> handleStop(command)
+            // Flash and alert commands never reach the session manager —
+            // they're handled directly in RecordingForegroundService.
+            // Guarded here only to keep the when exhaustive.
+            CommandType.FLASH_ON, CommandType.FLASH_OFF, CommandType.SHOW_ALERT -> Unit
         }
     }
 

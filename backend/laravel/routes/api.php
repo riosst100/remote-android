@@ -1,8 +1,10 @@
 <?php
 
 use App\Http\Controllers\Api\DeviceCommandController;
+use App\Http\Controllers\Api\DeviceAlertController;
 use App\Http\Controllers\Api\DeviceController;
 use App\Http\Controllers\Api\DeviceErrorController;
+use App\Http\Controllers\Api\DeviceFlashController;
 use App\Http\Controllers\Api\DeviceRecordingController;
 use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\RecordingChunkController;
@@ -40,6 +42,9 @@ Route::middleware('device')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/devices', [DeviceController::class, 'index']);
     Route::get('/devices/{device}', [DeviceController::class, 'show']);
+
+    Route::post('/devices/{device}/flash', [DeviceFlashController::class, 'store']);
+    Route::post('/devices/{device}/alert', [DeviceAlertController::class, 'store']);
 
     Route::post('/recordings/start', [RecordingController::class, 'start']);
     Route::post('/recordings/{recording:uuid}/stop', [RecordingController::class, 'stop']);

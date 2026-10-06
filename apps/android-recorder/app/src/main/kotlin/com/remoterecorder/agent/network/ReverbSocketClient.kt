@@ -53,7 +53,26 @@ class ReverbSocketClient(
 
     @Volatile private var status: ConnectionStatus = ConnectionStatus.DISCONNECTED
 
+    @Synchronized
     fun connect(deviceChannel: String) {
+        // Idempotent: onStartCommand (and thus this) fires repeatedly — from
+        // the launcher, the boot receiver, heartbeat restarts, etc. Opening
+        // a fresh socket on every call left multiple live connections racing
+        // to subscribe to the same channel, which Reverb rejected
+        // (pusher:error), so commands could stop arriving. If we already
+        // have a socket for this same channel and aren't disconnected,
+        // there is nothing to do.
+        if (deviceChannel == subscribedChannel && webSocket != null && status != ConnectionStatus.DISCONNECTED) {
+            return
+        }
+
+        // Channel changed, or the previous socket is dead/stale: tear down
+        // whatever is there before opening a new one, so we never leak a
+        // second concurrent connection.
+        webSocket?.close(1000, "reconnect")
+        webSocket = null
+        pingJob?.cancel()
+
         subscribedChannel = deviceChannel
         shouldReconnect = true
         reconnectAttempts = 0

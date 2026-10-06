@@ -8,6 +8,18 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Full-screen alert popup (SHOW_ALERT command): the alert activity is
+         launched via a full-screen-intent notification so it can appear over
+         the lock screen like an incoming call/alarm. VIBRATE accompanies the
+         alarm sound. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Lets the background service force the alert activity to the front
+         over any other app (not just over the lock screen). The user must
+         enable "Display over other apps" once in Settings (see
+         SetupActivity); never granted silently. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- Networking -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -56,6 +68,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Full-screen alert popup (SHOW_ALERT). Launched from a
+             full-screen-intent notification; shows over the lock screen and
+             excluded from recents so it behaves like a transient alarm. -->
+        <activity
+            android:name=".ui.AlertActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:showOnLockScreen="true"
+            android:theme="@style/Theme.RecorderAgent" />
 
         <service
             android:name=".recording.RecordingForegroundService"

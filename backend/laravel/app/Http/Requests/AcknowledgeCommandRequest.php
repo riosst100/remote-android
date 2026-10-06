@@ -14,7 +14,7 @@ class AcknowledgeCommandRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'event' => ['required', 'string', 'in:command_received,recording_started,recording_stopped,recording_error'],
+            'event' => ['required', 'string', 'in:command_received,recording_started,recording_stopped,recording_error,flash_applied,flash_error,alert_shown,alert_error'],
             'configuration' => ['nullable', 'array'],
             'configuration.encoder' => ['nullable', 'string'],
             'configuration.sample_rate' => ['nullable', 'integer'],

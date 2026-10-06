@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.remoterecorder.agent.R
@@ -19,6 +20,7 @@ import com.remoterecorder.agent.network.ConnectionStatus
 import com.remoterecorder.agent.network.ReverbSocketClient
 import com.remoterecorder.agent.util.AgentLog
 import com.remoterecorder.agent.util.DeviceCredentialStore
+import com.remoterecorder.agent.util.LightSensorReader
 import com.remoterecorder.agent.util.PendingRecordingStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,7 @@ class RecordingForegroundService : Service() {
     private lateinit var apiClient: ApiClient
     private lateinit var socketClient: ReverbSocketClient
     private lateinit var sessionManager: RecordingSessionManager
+    private lateinit var torchController: TorchController
     private lateinit var credentials: DeviceCredentialStore
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private var heartbeatJob: Job? = null
@@ -53,6 +56,7 @@ class RecordingForegroundService : Service() {
         credentials = DeviceCredentialStore(this)
         apiClient = ApiClient { credentials.token }
         sessionManager = RecordingSessionManager(this, apiClient)
+        torchController = TorchController(this)
 
         socketClient = ReverbSocketClient(
             tokenProvider = { credentials.token },
@@ -170,6 +174,18 @@ class RecordingForegroundService : Service() {
     private fun onCommandEvent(channel: String, event: String, data: org.json.JSONObject) {
         AgentLog.i("service", "Event $event on $channel")
 
+        if (event == "FlashCommandRequested") {
+            val on = data.optString("command") == "FLASH_ON"
+            val command = runCatching { Command.flashFromJson(data, on) }.getOrNull() ?: return
+            handleFlashCommand(command, on)
+            return
+        }
+
+        if (event == "AlertCommandRequested") {
+            handleAlertCommand(data)
+            return
+        }
+
         val command = when (event) {
             "RecordingStartRequested" -> runCatching { Command.startFromJson(data) }.getOrNull()
             "RecordingStopRequested" -> runCatching { Command.stopFromJson(data) }.getOrNull()
@@ -178,6 +194,132 @@ class RecordingForegroundService : Service() {
 
         sessionManager.handleCommand(command)
         updateNotification(recording = sessionManager.isRecording())
+    }
+
+    /**
+     * Toggles the torch and acks the command. Runs on serviceScope (IO) so
+     * both the Camera2 call and the HTTP ack stay off the main thread. A
+     * missing flash unit (or any failure) reports flash_error so the
+     * dashboard command is marked FAILED rather than left hanging.
+     */
+    private fun handleFlashCommand(command: Command, on: Boolean) {
+        serviceScope.launch {
+            val result = runCatching { torchController.setEnabled(on) }
+            val ackEvent = if (result.isSuccess) "flash_applied" else "flash_error"
+            val errorMessage = result.exceptionOrNull()?.message
+
+            if (result.isFailure) {
+                AgentLog.e("service", "Failed to toggle torch (on=$on)", result.exceptionOrNull())
+            }
+
+            runCatching {
+                apiClient.acknowledgeCommand(
+                    command.commandId,
+                    ackEvent,
+                    errorCode = if (result.isFailure) "SERVICE_ERROR" else null,
+                    errorMessage = errorMessage,
+                )
+            }.onFailure { AgentLog.e("service", "Failed to ack flash command ${command.commandId}", it) }
+        }
+    }
+
+    /**
+     * Shows a full-screen alert — but only when the room is dark. Reads the
+     * ambient light sensor first (off the main thread, since the read
+     * blocks); if the room isn't dark the alert is skipped. Either way the
+     * command is acked so the dashboard isn't left waiting.
+     *
+     * The alert itself uses a full-screen-intent notification that launches
+     * [com.remoterecorder.agent.ui.AlertActivity], which is what lets it
+     * surface over the lock screen and from the background on modern Android.
+     */
+    private fun handleAlertCommand(data: org.json.JSONObject) {
+        val commandId = data.optString("command_id").takeIf { it.isNotBlank() } ?: return
+        val title = data.optString("title").takeIf { it.isNotBlank() } ?: "Attention"
+        val message = data.optString("message")
+        val volume = if (data.has("volume")) data.optInt("volume", 100) else 100
+        val brightness = if (data.has("brightness")) data.optInt("brightness", 100) else 100
+        val buttonLabel = data.optString("button_label").takeIf { it.isNotBlank() } ?: "Dismiss"
+
+        serviceScope.launch {
+            val lux = LightSensorReader(this@RecordingForegroundService).readLuxBlocking()
+
+            // Only show the alert in a dark room. If the device has no light
+            // sensor (lux == null), show it anyway rather than silently never
+            // alerting. A lit room (lux at/above the threshold) skips the
+            // alert but still acks the command as handled.
+            val isDark = lux == null || lux < DARK_ROOM_LUX_THRESHOLD
+
+            if (!isDark) {
+                AgentLog.i("service", "Alert skipped: room is not dark (lux=$lux).")
+                ackAlert(commandId, "alert_shown")
+                return@launch
+            }
+
+            AgentLog.i("service", "Room is dark (lux=$lux); showing alert.")
+            val result = runCatching { showAlertNotification(title, message, volume, brightness, buttonLabel) }
+            if (result.isFailure) {
+                AgentLog.e("service", "Failed to show alert", result.exceptionOrNull())
+            }
+
+            ackAlert(
+                commandId,
+                if (result.isSuccess) "alert_shown" else "alert_error",
+                if (result.isFailure) "SERVICE_ERROR" else null,
+                result.exceptionOrNull()?.message,
+            )
+        }
+    }
+
+    private fun ackAlert(commandId: String, event: String, errorCode: String? = null, errorMessage: String? = null) {
+        runCatching {
+            apiClient.acknowledgeCommand(commandId, event, errorCode = errorCode, errorMessage = errorMessage)
+        }.onFailure { AgentLog.e("service", "Failed to ack alert command $commandId", it) }
+    }
+
+    private fun showAlertNotification(title: String, message: String, volume: Int, brightness: Int, buttonLabel: String) {
+        val activityIntent = Intent(this, com.remoterecorder.agent.ui.AlertActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra(com.remoterecorder.agent.ui.AlertActivity.EXTRA_TITLE, title)
+            putExtra(com.remoterecorder.agent.ui.AlertActivity.EXTRA_MESSAGE, message)
+            putExtra(com.remoterecorder.agent.ui.AlertActivity.EXTRA_VOLUME, volume)
+            putExtra(com.remoterecorder.agent.ui.AlertActivity.EXTRA_BRIGHTNESS, brightness)
+            putExtra(com.remoterecorder.agent.ui.AlertActivity.EXTRA_BUTTON_LABEL, buttonLabel)
+        }
+        val pendingIntent = android.app.PendingIntent.getActivity(
+            this,
+            ALERT_NOTIFICATION_ID,
+            activityIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        // Full-screen-intent notification: the reliable path on a locked or
+        // dozing screen, and the required fallback when background-activity
+        // starts are blocked (Android 10+). Always posted.
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID_ALERT)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setSmallIcon(R.drawable.ic_notification_mic)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setFullScreenIntent(pendingIntent, true)
+            .build()
+
+        getSystemService(NotificationManager::class.java).notify(ALERT_NOTIFICATION_ID, notification)
+
+        // When the user has granted "Display over other apps"
+        // (SYSTEM_ALERT_WINDOW), a background activity start is allowed, so
+        // we can force the alert to the front even over another running
+        // app. Without that permission this would be silently dropped on
+        // modern Android, so the full-screen-intent notification above is
+        // what covers that case.
+        if (Settings.canDrawOverlays(this)) {
+            runCatching { startActivity(activityIntent) }
+                .onFailure { AgentLog.w("service", "Could not foreground alert activity directly", it) }
+        } else {
+            AgentLog.w("service", "Overlay permission not granted; alert shown via full-screen notification only.")
+        }
     }
 
     private fun onConnectionStatusChanged(status: ConnectionStatus) {
@@ -227,11 +369,32 @@ class RecordingForegroundService : Service() {
                 description = getString(R.string.notification_channel_recording_description)
             },
         )
+
+        // High-importance channel for the full-screen alert. IMPORTANCE_HIGH
+        // is required for a full-screen intent to actually surface.
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ID_ALERT,
+                "Device Alerts",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "Remote full-screen alerts shown on this device"
+            },
+        )
     }
 
     companion object {
+        /**
+         * Below this many lux the room counts as "dark" and the alert is
+         * shown. ~10 lux is roughly a dim/unlit room at night; normal indoor
+         * lighting is 100+ lux.
+         */
+        private const val DARK_ROOM_LUX_THRESHOLD = 10f
+
         private const val NOTIFICATION_ID = 1001
+        private const val ALERT_NOTIFICATION_ID = 1002
         const val CHANNEL_ID_RECORDING = "recording_service"
+        const val CHANNEL_ID_ALERT = "device_alert"
 
         const val ACTION_SCHEDULE_START = "com.remoterecorder.agent.action.SCHEDULE_START"
         const val ACTION_SCHEDULE_STOP = "com.remoterecorder.agent.action.SCHEDULE_STOP"

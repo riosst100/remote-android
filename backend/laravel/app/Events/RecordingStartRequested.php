@@ -4,11 +4,11 @@ namespace App\Events;
 
 use App\Events\Concerns\BroadcastsToAdminAndRecording;
 use App\Models\DeviceCommand;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class RecordingStartRequested implements ShouldBroadcast
+class RecordingStartRequested implements ShouldBroadcastNow
 {
     use BroadcastsToAdminAndRecording, Dispatchable, SerializesModels;
 

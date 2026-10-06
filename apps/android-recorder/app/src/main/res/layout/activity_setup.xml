@@ -47,6 +47,13 @@
         android:id="@+id/exactAlarmButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/setup_exact_alarm_permission" />
+        android:text="@string/setup_exact_alarm_permission"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/overlayButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/setup_overlay_permission" />
 
 </LinearLayout>

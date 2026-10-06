@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple smartphone illustration for the alert, glowing screen to read as
+     "this device". -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="180dp"
+    android:viewportWidth="120"
+    android:viewportHeight="180">
+
+    <!-- Phone body -->
+    <path
+        android:fillColor="#1C1C1E"
+        android:strokeColor="#3A3A3C"
+        android:strokeWidth="3"
+        android:pathData="M28,6 L92,6 A14,14 0 0 1 106,20 L106,160 A14,14 0 0 1 92,174 L28,174 A14,14 0 0 1 14,160 L14,20 A14,14 0 0 1 28,6 Z" />
+
+    <!-- Screen, lit -->
+    <path
+        android:fillColor="#FF8A3D"
+        android:pathData="M24,26 L96,26 L96,154 L24,154 Z" />
+
+    <!-- Screen inner glow -->
+    <path
+        android:fillColor="#FFB877"
+        android:pathData="M32,40 L88,40 L88,120 L32,120 Z" />
+
+    <!-- Alert exclamation on screen -->
+    <path
+        android:fillColor="#1C1C1E"
+        android:pathData="M56,56 L64,56 L62,92 L58,92 Z" />
+    <path
+        android:fillColor="#1C1C1E"
+        android:pathData="M60,100 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+
+    <!-- Camera notch -->
+    <path
+        android:fillColor="#3A3A3C"
+        android:pathData="M54,14 L66,14 A2,2 0 0 1 68,16 A2,2 0 0 1 66,18 L54,18 A2,2 0 0 1 52,16 A2,2 0 0 1 54,14 Z" />
+</vector>

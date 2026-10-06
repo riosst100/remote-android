@@ -71,6 +71,44 @@
 </div>
 
 <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">Flashlight</h3>
+    <p class="muted">Turn the device's camera flashlight (torch) on or off remotely. The device must be online.</p>
+    <button id="flash-on-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Flash On</button>
+    <button id="flash-off-btn" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Flash Off</button>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">Alert Popup</h3>
+    <p class="muted">Show a full-screen alert with an alarm sound on the device. It keeps sounding until the user taps Dismiss on the phone. The device must be online.</p>
+    @php
+        $alertDefaults = $device->alert_defaults ?? [];
+        $defTitle = $alertDefaults['title'] ?? 'Attention';
+        $defMessage = $alertDefaults['message'] ?? 'Please check this device.';
+        $defVolume = $alertDefaults['volume'] ?? 100;
+        $defBrightness = $alertDefaults['brightness'] ?? 100;
+        $defButtonLabel = $alertDefaults['button_label'] ?? 'Dismiss';
+    @endphp
+    <div style="display:flex;flex-direction:column;gap:8px;max-width:480px;">
+        <input type="text" id="alert-title" placeholder="Title" value="{{ $defTitle }}" maxlength="120">
+        <textarea id="alert-message" placeholder="Message" rows="3" maxlength="500">{{ $defMessage }}</textarea>
+        <input type="text" id="alert-button-label" placeholder="Dismiss button label" value="{{ $defButtonLabel }}" maxlength="40">
+        <div>
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Volume: <span id="alert-volume-value">{{ $defVolume }}</span>%</label>
+            <input type="range" id="alert-volume" min="0" max="100" value="{{ $defVolume }}" step="5" style="width:100%;max-width:320px;">
+            <p class="muted" style="font-size:12px;margin:4px 0 0;">The device raises its alarm volume to this level while the alert sounds, then restores it on dismiss.</p>
+        </div>
+        <div>
+            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Brightness: <span id="alert-brightness-value">{{ $defBrightness }}</span>%</label>
+            <input type="range" id="alert-brightness" min="0" max="100" value="{{ $defBrightness }}" step="5" style="width:100%;max-width:320px;">
+            <p class="muted" style="font-size:12px;margin:4px 0 0;">The device sets its screen brightness to this level while the alert is shown, then restores it on dismiss. Settings are remembered per device.</p>
+        </div>
+        <div>
+            <button id="alert-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Send Alert</button>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
     <h3 style="margin-top:0;">Scheduled Recordings</h3>
     <p class="muted">Times are Asia/Jakarta (WIB / UTC+7). Each schedule starts a recording at the given day and time every week and stops it automatically after the set duration.</p>
 
@@ -201,6 +239,49 @@ document.getElementById('stop-btn').addEventListener('click', async (e) => {
         setTimeout(() => location.reload(), 800);
     } catch (err) {
         window.showToast(err.message, true);
+        e.target.disabled = false;
+    }
+});
+
+async function setFlash(on) {
+    try {
+        await window.apiFetch(`/api/devices/{{ $device->id }}/flash`, { method: 'POST', body: JSON.stringify({ on }) });
+        window.showToast(on ? 'Flash on requested.' : 'Flash off requested.');
+    } catch (err) {
+        window.showToast(err.message, true);
+    }
+}
+
+document.getElementById('flash-on-btn').addEventListener('click', () => setFlash(true));
+document.getElementById('flash-off-btn').addEventListener('click', () => setFlash(false));
+
+const alertVolume = document.getElementById('alert-volume');
+alertVolume.addEventListener('input', () => {
+    document.getElementById('alert-volume-value').textContent = alertVolume.value;
+});
+
+const alertBrightness = document.getElementById('alert-brightness');
+alertBrightness.addEventListener('input', () => {
+    document.getElementById('alert-brightness-value').textContent = alertBrightness.value;
+});
+
+document.getElementById('alert-btn').addEventListener('click', async (e) => {
+    const title = document.getElementById('alert-title').value.trim();
+    const message = document.getElementById('alert-message').value.trim();
+    const volume = parseInt(alertVolume.value, 10);
+    const brightness = parseInt(alertBrightness.value, 10);
+    const buttonLabel = document.getElementById('alert-button-label').value.trim() || 'Dismiss';
+    if (!title || !message) {
+        window.showToast('Title and message are required.', true);
+        return;
+    }
+    e.target.disabled = true;
+    try {
+        await window.apiFetch(`/api/devices/{{ $device->id }}/alert`, { method: 'POST', body: JSON.stringify({ title, message, volume, brightness, button_label: buttonLabel }) });
+        window.showToast('Alert sent.');
+    } catch (err) {
+        window.showToast(err.message, true);
+    } finally {
         e.target.disabled = false;
     }
 });

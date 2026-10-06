@@ -4,11 +4,11 @@ namespace App\Events;
 
 use App\Events\Concerns\BroadcastsToAdminAndDevice;
 use App\Models\Device;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class DeviceStatusChanged implements ShouldBroadcast
+class DeviceStatusChanged implements ShouldBroadcastNow
 {
     use BroadcastsToAdminAndDevice, Dispatchable, SerializesModels;
 

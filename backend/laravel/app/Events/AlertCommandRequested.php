@@ -2,29 +2,31 @@
 
 namespace App\Events;
 
-use App\Events\Concerns\BroadcastsToAdminAndRecording;
+use App\Events\Concerns\BroadcastsToAdminAndDevice;
 use App\Models\DeviceCommand;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class RecordingStopRequested implements ShouldBroadcastNow
+/**
+ * Pushes a SHOW_ALERT command (title + message) to the device over its
+ * private channel. Like the flash command, there is no Recording behind
+ * it, so it broadcasts on the device channel only.
+ */
+class AlertCommandRequested implements ShouldBroadcastNow
 {
-    use BroadcastsToAdminAndRecording, Dispatchable, SerializesModels;
+    use BroadcastsToAdminAndDevice, Dispatchable, SerializesModels;
 
     public int $deviceId;
-
-    public string $recordingUuid;
 
     public function __construct(public DeviceCommand $command)
     {
         $this->deviceId = $command->device_id;
-        $this->recordingUuid = $command->recording->uuid;
     }
 
     public function broadcastAs(): string
     {
-        return 'RecordingStopRequested';
+        return 'AlertCommandRequested';
     }
 
     public function broadcastWith(): array
@@ -32,12 +34,13 @@ class RecordingStopRequested implements ShouldBroadcastNow
         return [
             'command_id' => $this->command->command_id,
             'command' => $this->command->command->value,
-            'recording_id' => $this->recordingUuid,
-            // See RecordingStartRequested::broadcastWith for why device_id
-            // (UUID, for the Android command contract) and admin_device_id
-            // (numeric row id, for the dashboard) are both present.
             'device_id' => $this->command->device->device_uuid,
             'admin_device_id' => $this->deviceId,
+            'title' => $this->command->payload['title'] ?? null,
+            'message' => $this->command->payload['message'] ?? null,
+            'volume' => $this->command->payload['volume'] ?? 100,
+            'brightness' => $this->command->payload['brightness'] ?? 100,
+            'button_label' => $this->command->payload['button_label'] ?? 'Dismiss',
             'timestamp' => $this->command->created_at->toIso8601String(),
         ];
     }

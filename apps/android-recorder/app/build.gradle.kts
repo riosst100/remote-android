@@ -14,6 +14,12 @@ if (hasReleaseSigning) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
+}
+
 android {
     namespace = "com.remoterecorder.agent"
     compileSdk = 35
@@ -56,6 +62,24 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            // Optional local-backend overrides from local.properties (gitignored),
+            // e.g. debug.apiBaseUrl=http://127.0.0.1:8001 with `adb reverse`.
+            // Without them, debug builds use the production values above.
+            localProperties.getProperty("debug.apiBaseUrl")?.let {
+                buildConfigField("String", "API_BASE_URL", "\"$it\"")
+            }
+            localProperties.getProperty("debug.wsHost")?.let {
+                buildConfigField("String", "WS_HOST", "\"$it\"")
+            }
+            localProperties.getProperty("debug.wsPort")?.let {
+                buildConfigField("int", "WS_PORT", it)
+            }
+            localProperties.getProperty("debug.wsTls")?.let {
+                buildConfigField("boolean", "WS_TLS", it)
+            }
+            localProperties.getProperty("debug.reverbAppKey")?.let {
+                buildConfigField("String", "REVERB_APP_KEY", "\"$it\"")
+            }
         }
     }
 

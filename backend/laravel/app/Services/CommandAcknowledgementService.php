@@ -19,8 +19,25 @@ class CommandAcknowledgementService
             'recording_started' => $this->lifecycle->acknowledgeStarted($command, $payload['configuration'] ?? []),
             'recording_stopped' => $this->lifecycle->acknowledgeStopped($command),
             'recording_error' => $this->markFailed($command, $payload),
+            'flash_applied' => $this->markCompleted($command),
+            'flash_error' => $this->markFailed($command, $payload),
+            'alert_shown' => $this->markCompleted($command),
+            'alert_error' => $this->markFailed($command, $payload),
             default => null,
         };
+    }
+
+    private function markCompleted(DeviceCommand $command): void
+    {
+        if ($command->status === CommandStatus::COMPLETED) {
+            return;
+        }
+
+        $command->forceFill([
+            'status' => CommandStatus::COMPLETED,
+            'received_at' => $command->received_at ?? now(),
+            'completed_at' => now(),
+        ])->save();
     }
 
     private function markReceived(DeviceCommand $command): void
