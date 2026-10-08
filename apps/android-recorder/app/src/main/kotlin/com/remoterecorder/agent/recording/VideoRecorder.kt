@@ -48,6 +48,9 @@ class VideoRecorder(
     private var activeRecording: Recording? = null
     private var outputFile: File? = null
 
+    @Volatile private var finalizeLatch: CountDownLatch? = null
+    @Volatile private var finalizeSucceeded: Boolean = false
+
     private val mainExecutor = ContextCompat.getMainExecutor(context)
 
     fun hasCameraPermission(): Boolean =
@@ -104,12 +107,17 @@ class VideoRecorder(
                                     startLatch.countDown()
                                 }
                                 is VideoRecordEvent.Finalize -> {
-                                    if (event.hasError()) {
+                                    // ERROR_FILE_SIZE_LIMIT_REACHED(2)/DURATION(9) still yield a
+                                    // valid file; only treat a truly empty result as failure.
+                                    val ok = !event.hasError() || file.length() > 0
+                                    if (ok) {
+                                        AgentLog.i("video", "Recording finalized -> ${file.length()} bytes (err=${event.error})")
+                                    } else {
                                         AgentLog.e("video", "Finalize error code=${event.error}")
                                         onError(IllegalStateException("Video finalize error ${event.error}"))
-                                    } else {
-                                        AgentLog.i("video", "Recording finalized -> ${file.length()} bytes")
                                     }
+                                    finalizeSucceeded = ok
+                                    finalizeLatch?.countDown()
                                 }
                                 else -> { /* Status/Pause/Resume — ignored */ }
                             }
@@ -131,24 +139,33 @@ class VideoRecorder(
      * the finished file (or null if nothing was captured). Must not be called
      * on the main thread.
      */
-    fun stop(stopTimeoutMs: Long = 10_000): File? {
+    fun stop(stopTimeoutMs: Long = 15_000): File? {
         val file = outputFile ?: return null
-        val stopLatch = CountDownLatch(1)
 
+        // Request stop, then wait for the Finalize event (which is when the
+        // MP4's moov atom is actually written) before tearing down the
+        // camera — unbinding too early truncates the file (error code 8).
+        val latch = CountDownLatch(1)
+        finalizeLatch = latch
+        finalizeSucceeded = false
+
+        mainExecutor.execute { runCatching { activeRecording?.stop() } }
+
+        val finalized = latch.await(stopTimeoutMs, TimeUnit.MILLISECONDS)
+
+        // Now it's safe to release the camera.
+        val teardown = CountDownLatch(1)
         mainExecutor.execute {
-            runCatching { activeRecording?.stop() }
             activeRecording = null
             runCatching {
                 cameraProvider?.unbindAll()
                 lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
             }
-            stopLatch.countDown()
+            teardown.countDown()
         }
+        teardown.await(5_000, TimeUnit.MILLISECONDS)
 
-        stopLatch.await(stopTimeoutMs, TimeUnit.MILLISECONDS)
-
-        // Give the muxer a brief moment to flush the final moov atom.
-        Thread.sleep(500)
+        if (!finalized) AgentLog.w("video", "Finalize timed out; using whatever was written.")
 
         return file.takeIf { it.exists() && it.length() > 0 }
     }

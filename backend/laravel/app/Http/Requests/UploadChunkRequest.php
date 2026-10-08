@@ -14,7 +14,8 @@ class UploadChunkRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'chunk_number' => ['required', 'integer', 'min:1'],
+            // 0 is valid: video uploads as a single part numbered 0.
+            'chunk_number' => ['required', 'integer', 'min:0'],
             'checksum' => ['required', 'string', 'size:64', 'regex:/^[a-f0-9]+$/'],
             'duration' => ['nullable', 'integer', 'min:0'],
             // 1GB: recordings now upload as one file after stop() rather
@@ -26,7 +27,7 @@ class UploadChunkRequest extends FormRequest
             // sniffing the file's bytes, since FLAC and AAC-ADTS frame sync
             // codes are similar enough that content-based detection
             // misidentifies real FLAC chunks as AAC (see ChunkUploadService).
-            'mime_type' => ['nullable', 'string', 'in:audio/aac,audio/flac,audio/opus'],
+            'mime_type' => ['nullable', 'string', 'in:audio/aac,audio/flac,audio/opus,video/mp4'],
         ];
     }
 }

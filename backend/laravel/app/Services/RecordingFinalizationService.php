@@ -203,7 +203,9 @@ class RecordingFinalizationService
             throw new FinalizationException('No chunks were uploaded for this recording.');
         }
 
-        $expected = 1;
+        // Audio parts are numbered from 1; video uploads as a single part
+        // numbered 0. Either way, require a gapless run from the first number.
+        $expected = $chunks->first()->chunk_number;
         foreach ($chunks as $chunk) {
             if ($chunk->chunk_number !== $expected) {
                 throw new FinalizationException("Chunk sequence gap: expected chunk {$expected}, found {$chunk->chunk_number}.");

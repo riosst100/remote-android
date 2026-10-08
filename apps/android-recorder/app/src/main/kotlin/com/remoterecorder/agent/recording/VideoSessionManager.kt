@@ -25,6 +25,7 @@ import java.security.MessageDigest
 class VideoSessionManager(
     private val context: Context,
     private val apiClient: ApiClient,
+    private val onBeforeCameraOpen: () -> Unit = {},
 ) {
     enum class State { IDLE, RECORDING, STOPPING }
 
@@ -61,6 +62,10 @@ class VideoSessionManager(
             runCatching { apiClient.reportError("SERVICE_ERROR", "Camera permission not granted.", command.recordingId) }
             return
         }
+
+        // Promote the foreground service to the camera type before opening the
+        // camera, or the OS (Android 14+, and MIUI generally) blocks it.
+        runCatching { onBeforeCameraOpen() }
 
         val file = newRecorder.start()
         if (file == null) {

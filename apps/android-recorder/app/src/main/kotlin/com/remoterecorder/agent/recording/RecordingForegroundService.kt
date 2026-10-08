@@ -58,7 +58,7 @@ class RecordingForegroundService : Service() {
         credentials = DeviceCredentialStore(this)
         apiClient = ApiClient { credentials.token }
         sessionManager = RecordingSessionManager(this, apiClient)
-        videoSessionManager = VideoSessionManager(this, apiClient)
+        videoSessionManager = VideoSessionManager(this, apiClient, onBeforeCameraOpen = { ensureCameraForegroundType() })
         torchController = TorchController(this)
         sensorMonitor = SensorTelemetryMonitor(this, apiClient, serviceScope)
 
@@ -367,9 +367,33 @@ class RecordingForegroundService : Service() {
     private fun startForegroundWithNotification(recording: Boolean) {
         val notification = buildNotification(recording)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            // Always include microphone; add camera when video is (about to be)
+            // capturing so the OS lets CameraX open the camera from the
+            // background (strictly required on Android 14+, and MIUI blocks
+            // background camera without it).
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (::videoSessionManager.isInitialized && videoSessionManager.isRecording()) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
             startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    /**
+     * Promotes the foreground service to include the camera type *before*
+     * CameraX opens the camera. Called by the video session at START_VIDEO.
+     */
+    fun ensureCameraForegroundType() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(recording = true),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA,
+                )
+            }.onFailure { AgentLog.e("service", "Failed to promote FGS to camera type", it) }
         }
     }
 
