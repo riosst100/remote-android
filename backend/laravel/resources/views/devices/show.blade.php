@@ -142,6 +142,11 @@
                         <option value="far">Far (uncovered)</option>
                     </select>
                 </label>
+                <label style="font-size:12px;color:var(--muted);">Sustained for
+                    <span style="display:flex;gap:4px;align-items:center;margin-top:2px;">
+                        <input type="number" class="rule-for-seconds" min="0" max="3600" step="1" placeholder="0" style="width:70px;"> s
+                    </span>
+                </label>
                 <button class="rule-remove danger" type="button" style="margin-left:auto;">Remove</button>
             </div>
             <div class="rule-popup-fields" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;">
@@ -464,6 +469,7 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
             row.querySelector('.rule-lux-op').value = w.lux_op ?? '';
             row.querySelector('.rule-lux-value').value = (w.lux_value ?? '') === null ? '' : (w.lux_value ?? '');
             row.querySelector('.rule-proximity').value = w.proximity ?? '';
+            row.querySelector('.rule-for-seconds').value = (w.for_seconds ?? '') === null ? '' : (w.for_seconds ?? '');
             (w.days ?? []).forEach((d) => {
                 const cb = row.querySelector(`.rule-day[value="${d}"]`);
                 if (cb) cb.checked = true;
@@ -493,6 +499,7 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
                 lux_op: luxOp,
                 lux_value: luxOp && luxVal !== '' ? Number(luxVal) : null,
                 proximity: row.querySelector('.rule-proximity').value || null,
+                for_seconds: row.querySelector('.rule-for-seconds').value !== '' ? Number(row.querySelector('.rule-for-seconds').value) : null,
                 days: days.length ? days : null,
                 time_from: row.querySelector('.rule-time-from').value || null,
                 time_to: row.querySelector('.rule-time-to').value || null,

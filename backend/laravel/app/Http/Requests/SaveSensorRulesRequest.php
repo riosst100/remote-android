@@ -27,6 +27,11 @@ class SaveSensorRulesRequest extends FormRequest
             'rules.*.when.lux_value' => ['nullable', 'numeric', 'min:0', 'required_with:rules.*.when.lux_op'],
             'rules.*.when.proximity' => ['nullable', Rule::in(['near', 'far'])],
 
+            // Debounce: the conditions must hold continuously for this many
+            // seconds before the rule fires, so a momentary blip (a passing
+            // shadow dropping lux to 0) doesn't trigger it. 0/absent = instant.
+            'rules.*.when.for_seconds' => ['nullable', 'integer', 'between:0,3600'],
+
             // Optional day/time window — the rule only applies on these
             // weekdays (0 = Sunday) and inside [time_from, time_to).
             'rules.*.when.days' => ['nullable', 'array'],

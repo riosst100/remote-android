@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\MediaKind;
 use App\Enums\RecordingStatus;
 use App\Exceptions\DeviceUnavailableException;
+use App\Jobs\EvaluateDeviceSensorRules;
 use App\Models\Device;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -35,31 +36,72 @@ class SensorRuleEngine
     public function evaluate(Device $device, array $sensors): array
     {
         $rules = $device->sensor_rules ?? [];
-        $cacheKey = "sensor-rules:{$device->id}:matched";
+        $stateKey = "sensor-rules:{$device->id}:state";
+        $lastKey = "sensor-rules:{$device->id}:last";
 
         if ($rules === []) {
-            Cache::forget($cacheKey);
+            Cache::forget($stateKey);
+            Cache::forget($lastKey);
 
             return [];
         }
 
-        // Keyed by a fingerprint of each rule, so editing a rule resets only
-        // that rule's edge state and reordering rules changes nothing.
-        $previous = Cache::get($cacheKey, []);
+        // Remember the latest reading so the dwell backstop job can confirm a
+        // condition still holds even though the device, reporting only on
+        // change, may send nothing more while the state persists.
+        Cache::put($lastKey, $sensors, now()->addHour());
+
+        $now = now()->timestamp;
+
+        // State per rule (keyed by a fingerprint, so editing one rule resets
+        // only its state): since = when the condition started matching,
+        // fired = whether this continuous match episode already fired.
+        $previous = Cache::get($stateKey, []);
         $current = [];
         $fired = [];
+        $backstopDelays = [];
 
         foreach ($rules as $rule) {
             $key = md5(json_encode($rule));
-            $matches = $this->matches($rule['when'] ?? [], $sensors);
-            $current[$key] = $matches;
+            $dwell = max(0, (int) ($rule['when']['for_seconds'] ?? 0));
+            $prev = $previous[$key] ?? ['since' => null, 'fired' => false];
 
-            if ($matches && ! ($previous[$key] ?? false) && $this->fire($device, $rule, $sensors)) {
-                $fired[] = $rule['action'];
+            if (! $this->matches($rule['when'] ?? [], $sensors)) {
+                $current[$key] = ['since' => null, 'fired' => false];
+
+                continue;
+            }
+
+            $since = $prev['since'] ?? $now;
+            $current[$key] = ['since' => $since, 'fired' => (bool) $prev['fired']];
+
+            if ($current[$key]['fired']) {
+                continue; // one fire per continuous match episode
+            }
+
+            if ($now - $since >= $dwell) {
+                // Mark the episode handled whether or not a command was
+                // actually sent (a device-state guard may skip it), matching
+                // the "fire once per rising edge" contract.
+                $current[$key]['fired'] = true;
+                if ($this->fire($device, $rule, $sensors)) {
+                    $fired[] = $rule['action'];
+                }
+            } elseif ($prev['since'] === null) {
+                // Episode just opened and must hold for a while: note a
+                // backstop re-check in case no further report confirms it.
+                $backstopDelays[$dwell] = $dwell;
             }
         }
 
-        Cache::put($cacheKey, $current, now()->addDay());
+        Cache::put($stateKey, $current, now()->addDay());
+
+        // Dispatched only after the state is persisted, so a backstop that
+        // runs inline (sync queue) sees the just-opened episode and does not
+        // recurse into opening it again.
+        foreach ($backstopDelays as $delay) {
+            EvaluateDeviceSensorRules::dispatch($device->id)->delay(now()->addSeconds($delay));
+        }
 
         return $fired;
     }

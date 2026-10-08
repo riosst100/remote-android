@@ -8,6 +8,7 @@ use App\Events\DeviceSensorsUpdated;
 use App\Events\FlashCommandRequested;
 use App\Models\Device;
 use App\Models\User;
+use App\Jobs\EvaluateDeviceSensorRules;
 use App\Services\RecordingLifecycleService;
 use App\Services\SensorRuleEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -178,6 +179,53 @@ class SensorRulesTest extends TestCase
         $this->report(['motion' => 'PUT_DOWN', 'video_recording' => true]);
 
         $this->assertDatabaseHas('device_commands', ['device_id' => $this->device->id, 'command' => 'STOP_VIDEO']);
+    }
+
+    public function test_dwell_rule_ignores_a_momentary_blip(): void
+    {
+        $rule = $this->flashRule('FLASH_ON', ['lux_op' => 'lt', 'lux_value' => 10]);
+        $rule['when']['for_seconds'] = 3;
+        $this->rules([$rule]);
+
+        $this->travelTo('2026-10-08 10:00:00');
+        $this->report(['lux' => 0, 'flash_on' => false]);   // a passing shadow
+        Event::assertNotDispatched(FlashCommandRequested::class);
+
+        $this->travelTo('2026-10-08 10:00:01');
+        $this->report(['lux' => 200, 'flash_on' => false]); // recovered within 1s
+        Event::assertNotDispatched(FlashCommandRequested::class);
+    }
+
+    public function test_dwell_rule_fires_once_the_condition_holds_long_enough(): void
+    {
+        $rule = $this->flashRule('FLASH_ON', ['lux_op' => 'lt', 'lux_value' => 10]);
+        $rule['when']['for_seconds'] = 3;
+        $this->rules([$rule]);
+
+        $this->travelTo('2026-10-08 10:00:00');
+        $this->report(['lux' => 2, 'flash_on' => false]);
+        Event::assertNotDispatched(FlashCommandRequested::class);
+
+        $this->travelTo('2026-10-08 10:00:04'); // still dark 4s later
+        $this->report(['lux' => 2, 'flash_on' => false]);
+        Event::assertDispatchedTimes(FlashCommandRequested::class, 1);
+    }
+
+    public function test_dwell_backstop_fires_when_the_device_sends_no_further_report(): void
+    {
+        $rule = $this->flashRule('FLASH_ON', ['lux_op' => 'lt', 'lux_value' => 10]);
+        $rule['when']['for_seconds'] = 3;
+        $this->rules([$rule]);
+
+        $this->travelTo('2026-10-08 10:00:00');
+        $this->report(['lux' => 2, 'flash_on' => false]); // opens the window, no fire yet
+        Event::assertNotDispatched(FlashCommandRequested::class);
+
+        // The device goes quiet (dark and still). The scheduled backstop runs
+        // after the window against the last reading and confirms the condition.
+        $this->travelTo('2026-10-08 10:00:03');
+        (new EvaluateDeviceSensorRules($this->device->id))->handle(app(SensorRuleEngine::class));
+        Event::assertDispatchedTimes(FlashCommandRequested::class, 1);
     }
 
     public function test_scheduled_rule_only_fires_within_its_day_and_time_window(): void
