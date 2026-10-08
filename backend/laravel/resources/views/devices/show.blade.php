@@ -368,6 +368,33 @@ document.getElementById('stop-btn').addEventListener('click', async (e) => {
     }
 });
 
+/* Video recording start/stop. */
+document.getElementById('video-start-btn').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+        await window.apiFetch('/api/recordings/video/start', { method: 'POST', body: JSON.stringify({ device_id: {{ $device->id }} }) });
+        window.showToast('Video recording started.');
+        setTimeout(() => location.reload(), 800);
+    } catch (err) {
+        window.showToast(err.message, true);
+        e.target.disabled = false;
+    }
+});
+
+document.getElementById('video-stop-btn').addEventListener('click', async (e) => {
+    const recordingUuid = e.target.dataset.recording;
+    if (!recordingUuid) return;
+    e.target.disabled = true;
+    try {
+        await window.apiFetch(`/api/recordings/${recordingUuid}/video/stop`, { method: 'POST' });
+        window.showToast('Video stop requested — uploading & merging.');
+        setTimeout(() => location.reload(), 1200);
+    } catch (err) {
+        window.showToast(err.message, true);
+        e.target.disabled = false;
+    }
+});
+
 async function setFlash(on) {
     try {
         await window.apiFetch(`/api/devices/{{ $device->id }}/flash`, { method: 'POST', body: JSON.stringify({ on }) });
@@ -560,6 +587,13 @@ document.getElementById('alert-btn').addEventListener('click', async (e) => {
             const el = document.getElementById('actuator-flash');
             el.textContent = s.flash_on ? 'On' : 'Off';
             el.style.color = s.flash_on ? 'var(--warn)' : 'var(--muted)';
+        }
+        if (s.video_recording !== undefined) {
+            const el = document.getElementById('video-status');
+            if (el) {
+                el.textContent = s.video_recording ? 'Recording' : 'Idle';
+                el.style.color = s.video_recording ? 'var(--danger)' : 'var(--muted)';
+            }
         }
 
         const when = payload.at ? new Date(payload.at).toLocaleTimeString() : new Date().toLocaleTimeString();
