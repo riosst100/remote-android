@@ -179,6 +179,17 @@
 </div>
 
 <div class="card" style="margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <h3 style="margin:0;">Video Recording</h3>
+        <span class="stat" id="video-status" style="font-size:20px;color:var(--muted);">Unknown</span>
+    </div>
+    <p class="muted" style="margin-top:4px;">Records 1080p video from the rear camera in the background (no preview, not saved to the phone's gallery). The file uploads after you stop, then appears in Recording History below to download.</p>
+    @php $activeVideo = $device->recordings->first(fn($r) => !$r->status->isTerminal() && ($r->media_kind?->value ?? 'AUDIO') === 'VIDEO'); @endphp
+    <button id="video-start-btn" class="primary" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start Video</button>
+    <button id="video-stop-btn" class="danger" data-recording="{{ $activeVideo->uuid ?? '' }}" {{ $activeVideo ? '' : 'disabled' }}>Stop Video</button>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
     <h3 style="margin-top:0;">Flashlight</h3>
     <p class="muted">Turn the device's camera flashlight (torch) on or off remotely. The device must be online.</p>
     <button id="flash-on-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Flash On</button>
