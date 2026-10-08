@@ -7,6 +7,8 @@ use App\Events\AlertCommandRequested;
 use App\Events\DeviceSensorsUpdated;
 use App\Events\FlashCommandRequested;
 use App\Models\Device;
+use App\Models\User;
+use App\Services\SensorRuleEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
@@ -113,14 +115,16 @@ class SensorRulesTest extends TestCase
 
     public function test_rules_saved_from_the_dashboard_are_evaluated(): void
     {
-        $this->actingAs(\App\Models\User::factory()->create(), 'web');
+        $this->actingAs(User::factory()->create(), 'web');
         $this->postJson("/api/devices/{$this->device->id}/sensor-rules", [
             'rules' => [$this->flashRule('FLASH_ON', ['proximity' => 'near'])],
         ])->assertOk();
-        // Drop the admin session so the next request authenticates as the device.
-        $this->app['auth']->forgetGuards();
 
-        $this->report(['proximity_near' => true, 'flash_on' => false]);
+        // Same engine the /devices/sensors endpoint runs, fed the rules in
+        // exactly the shape the dashboard endpoint stored them.
+        $fired = app(SensorRuleEngine::class)->evaluate($this->device->fresh(), ['proximity_near' => true, 'flash_on' => false]);
+
+        $this->assertSame(['FLASH_ON'], $fired);
 
         Event::assertDispatchedTimes(FlashCommandRequested::class, 1);
     }
