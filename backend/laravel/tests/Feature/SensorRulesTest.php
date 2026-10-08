@@ -117,6 +117,8 @@ class SensorRulesTest extends TestCase
         $this->postJson("/api/devices/{$this->device->id}/sensor-rules", [
             'rules' => [$this->flashRule('FLASH_ON', ['proximity' => 'near'])],
         ])->assertOk();
+        // Drop the admin session so the next request authenticates as the device.
+        $this->app['auth']->forgetGuards();
 
         $this->report(['proximity_near' => true, 'flash_on' => false]);
 
