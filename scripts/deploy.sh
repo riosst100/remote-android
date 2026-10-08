@@ -32,6 +32,15 @@ as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo -n "$@"; fi; }
 cd "$ROOT/backend/laravel"
 [ -f .env ] || { echo "backend/laravel/.env is missing on the server" >&2; exit 1; }
 
+# ffmpeg is required to merge the uploaded video parts into the final MP4
+# (RecordingFinalizationService); without it every video recording fails at
+# finalization. Install it once if missing so a fresh VPS works out of the box.
+if ! command -v ffmpeg >/dev/null 2>&1; then
+    log "install ffmpeg (required for video merge)"
+    as_root apt-get update -qq
+    as_root apt-get install -y --no-install-recommends ffmpeg
+fi
+
 log "composer install"
 "$COMPOSER_BIN" install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
