@@ -313,17 +313,23 @@
 <div class="card">
     <h3 style="margin-top:0;">Recording History</h3>
     <table>
-        <thead><tr><th>Recording</th><th>Status</th><th>Source</th><th>Preset</th><th>Started</th><th>Duration</th><th></th></tr></thead>
+        <thead><tr><th>Recording</th><th>Kind</th><th>Status</th><th>Source</th><th>Started</th><th>Duration</th><th></th></tr></thead>
         <tbody>
         @forelse ($device->recordings as $recording)
+            @php $kind = $recording->media_kind?->value ?? 'AUDIO'; @endphp
             <tr>
                 <td><code>{{ substr($recording->uuid, 0, 8) }}</code></td>
+                <td>{{ $kind === 'VIDEO' ? '🎥 Video' : '🎙 Audio' }}</td>
                 <td><span class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td>
                 <td>{{ $recording->source->value }}</td>
-                <td>{{ $recording->preset->value }}</td>
                 <td class="muted">{{ optional($recording->started_at)->diffForHumans() ?? '—' }}</td>
                 <td>{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td>
-                <td><a href="{{ route('recordings.show', $recording) }}">View</a></td>
+                <td>
+                    <a href="{{ route('recordings.show', $recording) }}">View</a>
+                    @if ($recording->status->value === 'COMPLETED')
+                        · <a href="{{ route('recordings.download', $recording) }}">Download</a>
+                    @endif
+                </td>
             </tr>
         @empty
             <tr><td colspan="7" class="muted">No recordings for this device yet.</td></tr>
