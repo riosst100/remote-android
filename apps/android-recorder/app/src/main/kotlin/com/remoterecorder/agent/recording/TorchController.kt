@@ -3,6 +3,8 @@ package com.remoterecorder.agent.recording
 import android.content.Context
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.os.Handler
+import android.os.Looper
 import com.remoterecorder.agent.util.AgentLog
 
 /**
@@ -18,6 +20,7 @@ import com.remoterecorder.agent.util.AgentLog
 class TorchController(context: Context) {
 
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+    private var torchCallback: CameraManager.TorchCallback? = null
 
     fun setEnabled(enabled: Boolean) {
         val cameraId = findFlashCameraId()
@@ -25,6 +28,37 @@ class TorchController(context: Context) {
 
         cameraManager.setTorchMode(cameraId, enabled)
         AgentLog.i("torch", "Torch set to $enabled on camera $cameraId.")
+    }
+
+    /**
+     * Observes the real torch state of the flash camera, so changes made
+     * outside the agent (the Quick Settings tile, another app, the system
+     * turning it off when a camera opens) are reported too — not just the
+     * ones the agent itself applied. Android invokes the callback once
+     * right after registration with the current state, which also syncs
+     * the initial value. An unavailable torch (camera in use) is reported
+     * as off, since the flashlight can't be lit in that state.
+     */
+    fun startWatching(onChanged: (Boolean) -> Unit) {
+        if (torchCallback != null) return
+        val flashCameraId = runCatching { findFlashCameraId() }.getOrNull() ?: return
+
+        val callback = object : CameraManager.TorchCallback() {
+            override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+                if (cameraId == flashCameraId) onChanged(enabled)
+            }
+
+            override fun onTorchModeUnavailable(cameraId: String) {
+                if (cameraId == flashCameraId) onChanged(false)
+            }
+        }
+        cameraManager.registerTorchCallback(callback, Handler(Looper.getMainLooper()))
+        torchCallback = callback
+    }
+
+    fun stopWatching() {
+        torchCallback?.let { cameraManager.unregisterTorchCallback(it) }
+        torchCallback = null
     }
 
     private fun findFlashCameraId(): String? {

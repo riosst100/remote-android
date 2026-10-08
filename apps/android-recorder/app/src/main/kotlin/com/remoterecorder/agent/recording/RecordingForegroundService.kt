@@ -116,6 +116,7 @@ class RecordingForegroundService : Service() {
         // start once and keep running for the life of the service.
         if (!sensorsStarted) {
             sensorMonitor.start()
+            torchController.startWatching(::onTorchStateChanged)
             sensorsStarted = true
         }
 
@@ -159,6 +160,7 @@ class RecordingForegroundService : Service() {
         heartbeatJob?.cancel()
         socketClient.disconnect()
         sensorMonitor.stop()
+        torchController.stopWatching()
         super.onDestroy()
     }
 
@@ -226,6 +228,18 @@ class RecordingForegroundService : Service() {
 
         sessionManager.handleCommand(command)
         updateNotification(recording = sessionManager.isRecording())
+    }
+
+    /**
+     * Mirrors the real torch state, including manual toggles from outside
+     * the agent, and reports it at once so the dashboard doesn't keep
+     * showing a stale ON/OFF. No-op when the state already matches (e.g.
+     * the echo of a change handleFlashCommand just applied and reported).
+     */
+    private fun onTorchStateChanged(on: Boolean) {
+        if (ActuatorState.isFlashOn() == on) return
+        ActuatorState.setFlashOn(on)
+        sensorMonitor.reportNow()
     }
 
     /**
