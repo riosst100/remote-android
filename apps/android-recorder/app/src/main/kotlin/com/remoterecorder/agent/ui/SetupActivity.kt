@@ -56,7 +56,15 @@ class SetupActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
 
         findViewById<Button>(R.id.permissionButton).setOnClickListener {
-            requestMicPermission.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA))
+            val perms = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+            // Android 13+ gates notifications behind a runtime permission that
+            // is denied by default. The remote alert relies on a full-screen
+            // notification, so without this it never surfaces (common on MIUI,
+            // which is Android 13+). Request it alongside mic/camera.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            requestMicPermission.launch(perms.toTypedArray())
         }
 
         findViewById<Button>(R.id.registerButton).setOnClickListener {
@@ -121,8 +129,12 @@ class SetupActivity : AppCompatActivity() {
         val regStatus = if (credentials.isRegistered()) "registered (device id ${credentials.serverDeviceId})" else "not registered"
         val alarmStatus = if (canScheduleExactAlarms()) "granted" else "NOT granted"
         val overlayStatus = if (Settings.canDrawOverlays(this)) "granted" else "NOT granted"
-        statusText.text = "Microphone permission: $micStatus\nServer registration: $regStatus\nExact alarm scheduling: $alarmStatus\nDisplay over other apps: $overlayStatus"
+        val notifStatus = if (areNotificationsEnabled()) "enabled" else "NOT enabled"
+        statusText.text = "Microphone permission: $micStatus\nServer registration: $regStatus\nExact alarm scheduling: $alarmStatus\nDisplay over other apps: $overlayStatus\nNotifications: $notifStatus"
     }
+
+    private fun areNotificationsEnabled(): Boolean =
+        androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
 
     /**
      * Opens the system "Display over other apps" settings page for this app.

@@ -368,18 +368,17 @@ class RecordingForegroundService : Service() {
 
         getSystemService(NotificationManager::class.java).notify(ALERT_NOTIFICATION_ID, notification)
 
-        // When the user has granted "Display over other apps"
-        // (SYSTEM_ALERT_WINDOW), a background activity start is allowed, so
-        // we can force the alert to the front even over another running
-        // app. Without that permission this would be silently dropped on
-        // modern Android, so the full-screen-intent notification above is
-        // what covers that case.
-        if (Settings.canDrawOverlays(this)) {
-            runCatching { startActivity(activityIntent) }
-                .onFailure { AgentLog.w("service", "Could not foreground alert activity directly", it) }
-        } else {
-            AgentLog.w("service", "Overlay permission not granted; alert shown via full-screen notification only.")
-        }
+        // Also try to foreground the alert activity directly. A background
+        // activity start is allowed when the app has "Display over other
+        // apps" (SYSTEM_ALERT_WINDOW) and, on MIUI, the separate "show
+        // pop-up windows while running in background" permission. We attempt
+        // it unconditionally — on MIUI the two permissions are independent,
+        // so it can succeed even when canDrawOverlays() is false — and when
+        // the OS blocks it the call simply no-ops/throws (caught here) and
+        // the full-screen-intent notification above remains the fallback.
+        val overlay = Settings.canDrawOverlays(this)
+        runCatching { startActivity(activityIntent) }
+            .onFailure { AgentLog.w("service", "Direct alert activity start blocked (overlay=$overlay); using full-screen notification.", it) }
     }
 
     private fun onConnectionStatusChanged(status: ConnectionStatus) {
