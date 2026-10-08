@@ -194,6 +194,17 @@ class SensorRuleEngine
                         return false;
                     }
                     $this->recordings->startVideo($device);
+                    if (! empty($rule['with_flash'])) {
+                        // Light the scene once capture has begun. The torch
+                        // rides the same camera session and is released with
+                        // it when the recording stops, so no FLASH_OFF is
+                        // needed. A failed flash must not undo the recording.
+                        try {
+                            $this->flash->setFlash($device, true);
+                        } catch (DeviceUnavailableException $e) {
+                            Log::info('Sensor rule: flash-with-video skipped', ['device_id' => $device->id]);
+                        }
+                    }
 
                     return true;
 

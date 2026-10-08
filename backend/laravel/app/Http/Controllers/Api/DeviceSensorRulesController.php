@@ -41,6 +41,10 @@ class DeviceSensorRulesController extends Controller
                     ];
                 }
 
+                if ($rule['action'] === 'VIDEO_START') {
+                    $normalized['with_flash'] = (bool) ($rule['with_flash'] ?? false);
+                }
+
                 return $normalized;
             })
             ->values()

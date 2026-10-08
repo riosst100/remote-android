@@ -148,6 +148,11 @@
                 <input type="text" class="rule-popup-title" placeholder="Popup title" maxlength="120" style="flex:1;min-width:160px;">
                 <input type="text" class="rule-popup-message" placeholder="Popup message" maxlength="1000" style="flex:2;min-width:200px;">
             </div>
+            <div class="rule-videoflash-fields" style="margin-top:10px;">
+                <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;color:var(--text);">
+                    <input type="checkbox" class="rule-with-flash"> Turn the flash on too once recording starts
+                </label>
+            </div>
             <div class="rule-schedule-fields" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
                 <label style="font-size:12px;color:var(--muted);">Active days
                     <span style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
@@ -445,8 +450,9 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
     const tpl = document.getElementById('rule-template');
 
     const syncPopupVisibility = (row) => {
-        const isPopup = row.querySelector('.rule-action').value === 'POPUP';
-        row.querySelector('.rule-popup-fields').style.display = isPopup ? 'flex' : 'none';
+        const action = row.querySelector('.rule-action').value;
+        row.querySelector('.rule-popup-fields').style.display = action === 'POPUP' ? 'flex' : 'none';
+        row.querySelector('.rule-videoflash-fields').style.display = action === 'VIDEO_START' ? 'block' : 'none';
     };
 
     const addRow = (rule) => {
@@ -467,6 +473,7 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
             const p = rule.popup ?? {};
             row.querySelector('.rule-popup-title').value = p.title ?? '';
             row.querySelector('.rule-popup-message').value = p.message ?? '';
+            row.querySelector('.rule-with-flash').checked = !!rule.with_flash;
         }
         row.querySelector('.rule-action').addEventListener('change', () => syncPopupVisibility(row));
         row.querySelector('.rule-remove').addEventListener('click', () => row.remove());
@@ -496,6 +503,9 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
                 title: row.querySelector('.rule-popup-title').value.trim(),
                 message: row.querySelector('.rule-popup-message').value.trim(),
             };
+        }
+        if (action === 'VIDEO_START') {
+            rule.with_flash = row.querySelector('.rule-with-flash').checked;
         }
         return rule;
     });

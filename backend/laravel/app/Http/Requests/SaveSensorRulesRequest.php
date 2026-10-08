@@ -34,6 +34,10 @@ class SaveSensorRulesRequest extends FormRequest
             'rules.*.when.time_from' => ['nullable', 'date_format:H:i', 'required_with:rules.*.when.time_to'],
             'rules.*.when.time_to' => ['nullable', 'date_format:H:i', 'required_with:rules.*.when.time_from'],
 
+            // Only meaningful for VIDEO_START: also turn the flash on once
+            // the recording has started.
+            'rules.*.with_flash' => ['nullable', 'boolean'],
+
             // Popup copy — only meaningful (and required) when action is POPUP.
             'rules.*.popup' => ['nullable', 'array'],
             'rules.*.popup.title' => ['nullable', 'string', 'max:120'],

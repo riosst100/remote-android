@@ -139,6 +139,28 @@ class SensorRulesTest extends TestCase
         $this->assertDatabaseHas('recordings', ['device_id' => $this->device->id, 'media_kind' => 'VIDEO']);
     }
 
+    public function test_video_start_rule_also_turns_on_the_flash_when_asked(): void
+    {
+        $rule = $this->flashRule('VIDEO_START', ['motion' => 'PICKED_UP']);
+        $rule['with_flash'] = true;
+        $this->rules([$rule]);
+
+        $this->report(['motion' => 'PICKED_UP', 'video_recording' => false, 'flash_on' => false]);
+
+        $this->assertDatabaseHas('device_commands', ['device_id' => $this->device->id, 'command' => 'START_VIDEO']);
+        $this->assertDatabaseHas('device_commands', ['device_id' => $this->device->id, 'command' => 'FLASH_ON']);
+        Event::assertDispatched(FlashCommandRequested::class);
+    }
+
+    public function test_video_start_rule_leaves_the_flash_alone_by_default(): void
+    {
+        $this->rules([$this->flashRule('VIDEO_START', ['motion' => 'PICKED_UP'])]);
+
+        $this->report(['motion' => 'PICKED_UP', 'video_recording' => false, 'flash_on' => false]);
+
+        $this->assertDatabaseMissing('device_commands', ['device_id' => $this->device->id, 'command' => 'FLASH_ON']);
+    }
+
     public function test_video_start_rule_is_skipped_when_already_recording(): void
     {
         $this->rules([$this->flashRule('VIDEO_START', ['motion' => 'PICKED_UP'])]);
