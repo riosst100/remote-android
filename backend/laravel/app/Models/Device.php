@@ -21,6 +21,7 @@ class Device extends Model
         'app_version',
         'capabilities',
         'alert_defaults',
+        'sensor_rules',
         'status',
         'current_recording_id',
         'api_token_id',
@@ -33,6 +34,7 @@ class Device extends Model
         return [
             'capabilities' => 'array',
             'alert_defaults' => 'array',
+            'sensor_rules' => 'array',
             'status' => DeviceStatus::class,
             'last_seen_at' => 'datetime',
             'schedules_synced_at' => 'datetime',

@@ -43,6 +43,114 @@
 </div>
 
 <div class="card" style="margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <h3 style="margin:0;">Live Sensors</h3>
+        <span id="sensors-updated" class="muted" style="font-size:12px;">waiting for device…</span>
+    </div>
+    <p class="muted" style="margin-top:4px;">Streamed in real time while the device is running. Values are not stored — they appear as the device reports them.</p>
+    <div class="grid cols-3" style="margin-top:12px;">
+        <div class="card" style="background:rgba(255,255,255,.02);">
+            <div class="stat-label">Light</div>
+            <div class="stat" id="sensor-lux" style="font-size:28px;">—</div>
+            <div class="muted" id="sensor-lux-note" style="font-size:12px;">lux</div>
+        </div>
+        <div class="card" style="background:rgba(255,255,255,.02);">
+            <div class="stat-label">Motion</div>
+            <div class="stat" id="sensor-motion" style="font-size:28px;">—</div>
+            <div class="muted" id="sensor-motion-note" style="font-size:12px;">accelerometer</div>
+        </div>
+        <div class="card" style="background:rgba(255,255,255,.02);">
+            <div class="stat-label">Proximity</div>
+            <div class="stat" id="sensor-proximity" style="font-size:28px;">—</div>
+            <div class="muted" id="sensor-proximity-note" style="font-size:12px;">cover sensor</div>
+        </div>
+    </div>
+
+    <h4 style="margin:20px 0 8px;">Actuators</h4>
+    <div class="grid cols-2" style="margin-top:4px;">
+        <div class="card" style="background:rgba(255,255,255,.02);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div>
+                    <div class="stat-label">Popup</div>
+                    <div class="stat" id="actuator-popup" style="font-size:24px;color:var(--muted);">Unknown</div>
+                </div>
+                <button id="dismiss-popup-btn" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Close Popup</button>
+            </div>
+        </div>
+        <div class="card" style="background:rgba(255,255,255,.02);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div>
+                    <div class="stat-label">Flash</div>
+                    <div class="stat" id="actuator-flash" style="font-size:24px;color:var(--muted);">Unknown</div>
+                </div>
+                <button id="flash-off-inline-btn" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Off</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <h3 style="margin:0;">Sensor Automation</h3>
+        <span id="rules-status" class="muted" style="font-size:12px;"></span>
+    </div>
+    <p class="muted" style="margin-top:4px;">Rules the device evaluates locally against its live sensors. All conditions in a rule must hold (AND); leave a condition blank to ignore it. The action fires once each time the conditions become true.</p>
+
+    <div id="rules-list" style="margin-top:12px;"></div>
+
+    <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="add-rule-btn">+ Add Rule</button>
+        <button id="save-rules-btn" class="primary">Save Rules</button>
+    </div>
+
+    {{-- Template for one rule row, cloned by JS. --}}
+    <template id="rule-template">
+        <div class="card rule-row" style="background:rgba(255,255,255,.02);margin-bottom:10px;">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+                <label style="font-size:12px;color:var(--muted);">Action
+                    <select class="rule-action" style="display:block;margin-top:2px;">
+                        <option value="POPUP">Show Popup</option>
+                        <option value="FLASH_ON">Flash On</option>
+                        <option value="FLASH_OFF">Flash Off</option>
+                    </select>
+                </label>
+                <label style="font-size:12px;color:var(--muted);">Motion
+                    <select class="rule-motion" style="display:block;margin-top:2px;">
+                        <option value="">(any)</option>
+                        <option value="PICKED_UP">Picked up</option>
+                        <option value="PUT_DOWN">Put down</option>
+                        <option value="STILL">Still</option>
+                        <option value="MOVING">Moving</option>
+                    </select>
+                </label>
+                <label style="font-size:12px;color:var(--muted);">Light (lux)
+                    <span style="display:flex;gap:4px;margin-top:2px;">
+                        <select class="rule-lux-op">
+                            <option value="">(ignore)</option>
+                            <option value="lt">&lt;</option>
+                            <option value="gt">&gt;</option>
+                        </select>
+                        <input type="number" class="rule-lux-value" min="0" step="1" placeholder="value" style="width:90px;">
+                    </span>
+                </label>
+                <label style="font-size:12px;color:var(--muted);">Proximity
+                    <select class="rule-proximity" style="display:block;margin-top:2px;">
+                        <option value="">(any)</option>
+                        <option value="near">Near (covered)</option>
+                        <option value="far">Far (uncovered)</option>
+                    </select>
+                </label>
+                <button class="rule-remove danger" type="button" style="margin-left:auto;">Remove</button>
+            </div>
+            <div class="rule-popup-fields" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;">
+                <input type="text" class="rule-popup-title" placeholder="Popup title" maxlength="120" style="flex:1;min-width:160px;">
+                <input type="text" class="rule-popup-message" placeholder="Popup message" maxlength="1000" style="flex:2;min-width:200px;">
+            </div>
+        </div>
+    </template>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
     <h3 style="margin-top:0;">Start a Recording</h3>
     <p class="muted">Expected configuration per preset, resolved against this device's reported capabilities. The device performs its own final fallback if the proposed configuration turns out to be unsupported.</p>
     <table style="margin-bottom:16px;">
@@ -255,6 +363,92 @@ async function setFlash(on) {
 document.getElementById('flash-on-btn').addEventListener('click', () => setFlash(true));
 document.getElementById('flash-off-btn').addEventListener('click', () => setFlash(false));
 
+/* Inline actuator controls on the Live Sensors card. */
+document.getElementById('flash-off-inline-btn').addEventListener('click', () => setFlash(false));
+document.getElementById('dismiss-popup-btn').addEventListener('click', async () => {
+    try {
+        await window.apiFetch(`/api/devices/{{ $device->id }}/alert/dismiss`, { method: 'POST' });
+        window.showToast('Close popup requested.');
+    } catch (err) {
+        window.showToast(err.message, true);
+    }
+});
+
+/* ---- Sensor automation rules editor ---- */
+(function () {
+    const existing = @json($device->sensor_rules ?? []);
+    const listEl = document.getElementById('rules-list');
+    const tpl = document.getElementById('rule-template');
+
+    const syncPopupVisibility = (row) => {
+        const isPopup = row.querySelector('.rule-action').value === 'POPUP';
+        row.querySelector('.rule-popup-fields').style.display = isPopup ? 'flex' : 'none';
+    };
+
+    const addRow = (rule) => {
+        const row = tpl.content.firstElementChild.cloneNode(true);
+        if (rule) {
+            row.querySelector('.rule-action').value = rule.action ?? 'POPUP';
+            const w = rule.when ?? {};
+            row.querySelector('.rule-motion').value = w.motion ?? '';
+            row.querySelector('.rule-lux-op').value = w.lux_op ?? '';
+            row.querySelector('.rule-lux-value').value = (w.lux_value ?? '') === null ? '' : (w.lux_value ?? '');
+            row.querySelector('.rule-proximity').value = w.proximity ?? '';
+            const p = rule.popup ?? {};
+            row.querySelector('.rule-popup-title').value = p.title ?? '';
+            row.querySelector('.rule-popup-message').value = p.message ?? '';
+        }
+        row.querySelector('.rule-action').addEventListener('change', () => syncPopupVisibility(row));
+        row.querySelector('.rule-remove').addEventListener('click', () => row.remove());
+        listEl.appendChild(row);
+        syncPopupVisibility(row);
+    };
+
+    const collect = () => Array.from(listEl.querySelectorAll('.rule-row')).map((row) => {
+        const action = row.querySelector('.rule-action').value;
+        const luxOp = row.querySelector('.rule-lux-op').value || null;
+        const luxVal = row.querySelector('.rule-lux-value').value;
+        const rule = {
+            action,
+            when: {
+                motion: row.querySelector('.rule-motion').value || null,
+                lux_op: luxOp,
+                lux_value: luxOp && luxVal !== '' ? Number(luxVal) : null,
+                proximity: row.querySelector('.rule-proximity').value || null,
+            },
+        };
+        if (action === 'POPUP') {
+            rule.popup = {
+                title: row.querySelector('.rule-popup-title').value.trim(),
+                message: row.querySelector('.rule-popup-message').value.trim(),
+                volume: 100,
+                brightness: 100,
+            };
+        }
+        return rule;
+    });
+
+    document.getElementById('add-rule-btn').addEventListener('click', () => addRow(null));
+    document.getElementById('save-rules-btn').addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        const statusEl = document.getElementById('rules-status');
+        try {
+            await window.apiFetch(`/api/devices/{{ $device->id }}/sensor-rules`, {
+                method: 'POST',
+                body: JSON.stringify({ rules: collect() }),
+            });
+            statusEl.textContent = 'saved — device picks it up on next heartbeat';
+            window.showToast('Sensor rules saved.');
+        } catch (err) {
+            window.showToast(err.message, true);
+        } finally {
+            e.target.disabled = false;
+        }
+    });
+
+    existing.forEach(addRow);
+})();
+
 const alertVolume = document.getElementById('alert-volume');
 alertVolume.addEventListener('input', () => {
     document.getElementById('alert-volume-value').textContent = alertVolume.value;
@@ -285,5 +479,76 @@ document.getElementById('alert-btn').addEventListener('click', async (e) => {
         e.target.disabled = false;
     }
 });
+
+/* Live sensor telemetry, pushed over Reverb on the device's private channel. */
+(function () {
+    const statusEl = document.getElementById('sensors-updated');
+    const setStatus = (text) => { if (statusEl) statusEl.textContent = text; };
+
+    if (!window.realtimeReady) {
+        setStatus('realtime unavailable (not logged in?)');
+        console.warn('[sensors] window.realtimeReady is undefined — realtime block did not initialise.');
+        return;
+    }
+
+    setStatus('connecting…');
+
+    window.realtimeReady.then((pusher) => {
+    const channel = pusher.subscribe('private-devices.{{ $device->id }}');
+
+    channel.bind('pusher:subscription_succeeded', () => {
+        setStatus('connected — waiting for readings…');
+        console.info('[sensors] subscribed to private-devices.{{ $device->id }}');
+    });
+    channel.bind('pusher:subscription_error', (e) => {
+        setStatus('subscription error (see console)');
+        console.error('[sensors] subscription_error', e);
+    });
+
+    const luxNote = (lux) => {
+        if (lux < 10) return 'dark';
+        if (lux < 50) return 'dim';
+        if (lux < 1000) return 'indoor';
+        return 'bright';
+    };
+    const motionLabel = {
+        STILL: 'Still', PICKED_UP: 'Picked up', PUT_DOWN: 'Put down', MOVING: 'Moving',
+    };
+
+    channel.bind('DeviceSensorsUpdated', (payload) => {
+        console.debug('[sensors] event', payload);
+        const s = payload.sensors || {};
+
+        if (s.lux !== undefined) {
+            document.getElementById('sensor-lux').textContent = Math.round(s.lux);
+            document.getElementById('sensor-lux-note').textContent = `lux · ${luxNote(s.lux)}`;
+        }
+        if (s.motion !== undefined) {
+            document.getElementById('sensor-motion').textContent = motionLabel[s.motion] ?? s.motion;
+            const mag = s.accel_magnitude;
+            document.getElementById('sensor-motion-note').textContent =
+                mag !== undefined ? `${mag.toFixed(1)} m/s²` : 'accelerometer';
+        }
+        if (s.proximity_near !== undefined) {
+            document.getElementById('sensor-proximity').textContent = s.proximity_near ? 'Near' : 'Far';
+            document.getElementById('sensor-proximity-note').textContent =
+                s.proximity_near ? 'covered / in pocket' : 'uncovered';
+        }
+        if (s.popup_shown !== undefined) {
+            const el = document.getElementById('actuator-popup');
+            el.textContent = s.popup_shown ? 'Showing' : 'None';
+            el.style.color = s.popup_shown ? 'var(--accent)' : 'var(--muted)';
+        }
+        if (s.flash_on !== undefined) {
+            const el = document.getElementById('actuator-flash');
+            el.textContent = s.flash_on ? 'On' : 'Off';
+            el.style.color = s.flash_on ? 'var(--warn)' : 'var(--muted)';
+        }
+
+        const when = payload.at ? new Date(payload.at).toLocaleTimeString() : new Date().toLocaleTimeString();
+        document.getElementById('sensors-updated').textContent = `updated ${when}`;
+    });
+    });
+})();
 </script>
 @endpush

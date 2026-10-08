@@ -18,6 +18,7 @@ class RecordingResource extends JsonResource
                 'name' => $this->device->name,
             ]),
             'status' => $this->status->value,
+            'media_kind' => $this->media_kind?->value ?? 'AUDIO',
             'preset' => $this->preset->value,
             'source' => $this->source->value,
             'encoder' => $this->encoder,

@@ -2,7 +2,7 @@ package com.remoterecorder.agent.model
 
 import org.json.JSONObject
 
-enum class CommandType { START_RECORDING, STOP_RECORDING, FLASH_ON, FLASH_OFF, SHOW_ALERT }
+enum class CommandType { START_RECORDING, STOP_RECORDING, START_VIDEO, STOP_VIDEO, FLASH_ON, FLASH_OFF, SHOW_ALERT }
 
 /**
  * A control-plane command as delivered over the WebSocket. `commandId` is
@@ -30,6 +30,24 @@ data class Command(
         fun stopFromJson(json: JSONObject): Command = Command(
             commandId = json.getString("command_id"),
             type = CommandType.STOP_RECORDING,
+            recordingId = json.getString("recording_id"),
+            deviceId = json.getString("device_id"),
+            payload = JSONObject(),
+            timestamp = json.optString("timestamp"),
+        )
+
+        fun startVideoFromJson(json: JSONObject): Command = Command(
+            commandId = json.getString("command_id"),
+            type = CommandType.START_VIDEO,
+            recordingId = json.getString("recording_id"),
+            deviceId = json.getString("device_id"),
+            payload = json.optJSONObject("configuration") ?: JSONObject(),
+            timestamp = json.optString("timestamp"),
+        )
+
+        fun stopVideoFromJson(json: JSONObject): Command = Command(
+            commandId = json.getString("command_id"),
+            type = CommandType.STOP_VIDEO,
             recordingId = json.getString("recording_id"),
             deviceId = json.getString("device_id"),
             payload = JSONObject(),

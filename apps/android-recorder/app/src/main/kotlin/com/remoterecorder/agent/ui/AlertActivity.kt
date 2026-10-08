@@ -24,7 +24,6 @@ import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import com.remoterecorder.agent.R
-import com.remoterecorder.agent.recording.TorchController
 import com.remoterecorder.agent.util.AgentLog
 
 /**
@@ -46,7 +45,6 @@ class AlertActivity : AppCompatActivity() {
     private var sensorManager: SensorManager? = null
     private var lightListener: SensorEventListener? = null
 
-    private val torch by lazy { TorchController(this) }
     private var pendingTitle: String = "Attention"
     private var pendingMessage: String = ""
     private var pendingVolume: Int = 100
@@ -55,6 +53,9 @@ class AlertActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        visibleInstance = this
+        com.remoterecorder.agent.recording.ActuatorState.setPopupShown(true)
 
         showWhenLockedAndTurnScreenOn()
         setContentView(R.layout.activity_alert)
@@ -74,9 +75,8 @@ class AlertActivity : AppCompatActivity() {
             // (MIUI/One UI) otherwise re-tint buttons with the system accent.
             backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFFF6900.toInt())
             setOnClickListener {
-                // Dismiss turns the flashlight off (it was turned on
-                // automatically when the alert appeared) and closes.
-                runCatching { torch.setEnabled(false) }
+                // The alert no longer controls the flashlight, so dismissing
+                // just closes — it leaves the torch in whatever state it was.
                 finish()
             }
         }
@@ -91,12 +91,6 @@ class AlertActivity : AppCompatActivity() {
 
         startAlarm(volumePercent)
 
-        // Turn the flashlight on automatically while the alert is up (off
-        // again on dismiss / onDestroy). Best-effort: a device with no flash
-        // just skips it.
-        runCatching { torch.setEnabled(true) }
-            .onFailure { AgentLog.w("alert", "Could not turn flash on for alert", it) }
-
         // Remember what to re-show if the user leaves via Home/Recents (see
         // onStop) — this is how the alert "forces itself back" without the
         // screen-pinning toast.
@@ -106,7 +100,11 @@ class AlertActivity : AppCompatActivity() {
         pendingBrightness = brightnessPercent
         pendingButtonLabel = buttonLabel
 
-        startLightAutoClose()
+        // Only auto-close on brightening when explicitly asked (the old
+        // dark-room alarm). Manual alerts stay up until Dismiss.
+        if (intent.getBooleanExtra(EXTRA_LIGHT_AUTO_CLOSE, false)) {
+            startLightAutoClose()
+        }
     }
 
     /**
@@ -126,7 +124,6 @@ class AlertActivity : AppCompatActivity() {
                 val lux = event.values.firstOrNull() ?: return
                 if (lux >= LIGHT_AUTO_CLOSE_LUX && !isFinishing) {
                     AgentLog.i("alert", "Room became bright (lux=$lux); auto-closing alert.")
-                    runCatching { torch.setEnabled(false) }
                     finish()
                 }
             }
@@ -266,22 +263,33 @@ class AlertActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (visibleInstance === this) visibleInstance = null
+        com.remoterecorder.agent.recording.ActuatorState.setPopupShown(false)
         mainHandler.removeCallbacksAndMessages(null)
         lightListener?.let { sensorManager?.unregisterListener(it) }
         lightListener = null
-        // Safety net: make sure the flash is off once the alert is really
-        // gone, even if it was closed some way other than the Dismiss tap.
-        runCatching { torch.setEnabled(false) }
         stopAlarm()
         super.onDestroy()
     }
 
     companion object {
+        /** The currently-showing alert, if any, so a dashboard DISMISS_ALERT can close it. */
+        @Volatile
+        private var visibleInstance: AlertActivity? = null
+
+        /** Closes the visible alert (if any) from the service. Safe to call off the main thread. */
+        fun dismissVisible() {
+            visibleInstance?.let { activity ->
+                activity.runOnUiThread { runCatching { activity.finish() } }
+            }
+        }
+
         const val EXTRA_TITLE = "alert_title"
         const val EXTRA_MESSAGE = "alert_message"
         const val EXTRA_VOLUME = "alert_volume"
         const val EXTRA_BRIGHTNESS = "alert_brightness"
         const val EXTRA_BUTTON_LABEL = "alert_button_label"
+        const val EXTRA_LIGHT_AUTO_CLOSE = "alert_light_auto_close"
 
         /**
          * Lux at or above which the alert auto-closes (lights turned on).

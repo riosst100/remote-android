@@ -18,6 +18,7 @@ class DeviceResource extends JsonResource
             'android_version' => $this->android_version,
             'app_version' => $this->app_version,
             'capabilities' => $this->capabilities,
+            'sensor_rules' => $this->sensor_rules ?? [],
             'status' => $this->status->value,
             'last_seen_at' => optional($this->last_seen_at)->toIso8601String(),
             'current_recording' => $this->whenLoaded('recordings', function () {

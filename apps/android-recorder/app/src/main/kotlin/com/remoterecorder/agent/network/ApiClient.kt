@@ -64,6 +64,36 @@ class ApiClient(private val tokenProvider: () -> String?) {
         return executeJson(request, authenticated = true)
     }
 
+    /**
+     * Reports a live sensor snapshot. Fire-and-forget telemetry — the server
+     * broadcasts it to the dashboard and persists nothing, so a dropped
+     * report simply means one skipped frame on the dashboard.
+     */
+    fun reportSensors(
+        lux: Float?,
+        motion: String?,
+        accelMagnitude: Float?,
+        proximityNear: Boolean?,
+        popupShown: Boolean? = null,
+        flashOn: Boolean? = null,
+        videoRecording: Boolean? = null,
+    ): JSONObject {
+        val body = JSONObject().apply {
+            lux?.let { put("lux", it.toDouble()) }
+            motion?.let { put("motion", it) }
+            accelMagnitude?.let { put("accel_magnitude", it.toDouble()) }
+            proximityNear?.let { put("proximity_near", it) }
+            popupShown?.let { put("popup_shown", it) }
+            flashOn?.let { put("flash_on", it) }
+            videoRecording?.let { put("video_recording", it) }
+        }
+        val request = authedRequestBuilder("/api/devices/sensors")
+            .post(body.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        return executeJson(request, authenticated = true)
+    }
+
     fun reportError(errorCode: String, message: String?, recordingId: String?) {
         val body = JSONObject().apply {
             put("error_code", errorCode)

@@ -4,8 +4,10 @@
 
     <!-- Recording -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Full-screen alert popup (SHOW_ALERT command): the alert activity is
@@ -76,14 +78,15 @@
             android:name=".ui.AlertActivity"
             android:exported="false"
             android:excludeFromRecents="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleInstance"
             android:showOnLockScreen="true"
+            android:taskAffinity=".alert"
             android:theme="@style/Theme.RecorderAgent" />
 
         <service
             android:name=".recording.RecordingForegroundService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone|camera" />
 
         <receiver
             android:name=".boot.BootCompletedReceiver"

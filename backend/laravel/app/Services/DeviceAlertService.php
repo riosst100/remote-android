@@ -6,6 +6,7 @@ use App\Enums\CommandStatus;
 use App\Enums\CommandType;
 use App\Enums\DeviceStatus;
 use App\Events\AlertCommandRequested;
+use App\Events\DismissAlertCommandRequested;
 use App\Exceptions\DeviceUnavailableException;
 use App\Models\Device;
 use App\Models\DeviceCommand;
@@ -52,6 +53,32 @@ class DeviceAlertService
 
         $command->load('device');
         AlertCommandRequested::dispatch($command);
+
+        return $command;
+    }
+
+    /**
+     * Dispatch a DISMISS_ALERT command so the device closes any
+     * currently-showing alert popup. Fire-and-forget, same as flash.
+     */
+    public function dismissAlert(Device $device): DeviceCommand
+    {
+        if ($device->status === DeviceStatus::OFFLINE) {
+            throw new DeviceUnavailableException('Device is offline and cannot dismiss an alert.');
+        }
+
+        $command = DeviceCommand::query()->create([
+            'device_id' => $device->id,
+            'recording_id' => null,
+            'command_id' => (string) Str::uuid(),
+            'command' => CommandType::DISMISS_ALERT,
+            'payload' => [],
+            'status' => CommandStatus::SENT,
+            'sent_at' => now(),
+        ]);
+
+        $command->load('device');
+        DismissAlertCommandRequested::dispatch($command);
 
         return $command;
     }

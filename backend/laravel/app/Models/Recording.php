@@ -19,6 +19,7 @@ class Recording extends Model
         'uuid',
         'device_id',
         'status',
+        'media_kind',
         'preset',
         'source',
         'encoder',
@@ -38,6 +39,7 @@ class Recording extends Model
     {
         return [
             'status' => RecordingStatus::class,
+            'media_kind' => \App\Enums\MediaKind::class,
             'preset' => RecordingPreset::class,
             'source' => RecordingSource::class,
             'started_at' => 'datetime',

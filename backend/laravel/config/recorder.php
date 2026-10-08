@@ -17,4 +17,10 @@ return [
     // Guards against a missed STOP_RECORDING/ack over the websocket leaving
     // a recording stuck forever with no retry path.
     'stuck_recording_timeout_seconds' => env('RECORDER_STUCK_RECORDING_TIMEOUT', 1800),
+
+    // Path to the ffmpeg binary, used to concatenate video (mp4) recording
+    // parts into one file (audio parts are byte-concatenated without it).
+    // Defaults to "ffmpeg" on PATH; override in .env where it lives elsewhere
+    // (e.g. a Windows build during local WSL development).
+    'ffmpeg_path' => env('RECORDER_FFMPEG_PATH', 'ffmpeg'),
 ];

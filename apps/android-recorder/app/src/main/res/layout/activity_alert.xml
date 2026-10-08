@@ -77,17 +77,25 @@
             android:gravity="center"
             android:text="" />
 
-        <!-- Dismiss button, full width pill -->
+        <!-- Dismiss button: deliberately small and tucked to the side so it
+             is hard to hit by accident — the alert is meant to be insistent. -->
         <Button
             android:id="@+id/alert_dismiss"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:layout_marginTop="28dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="5dp"
+            android:paddingEnd="5dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp"
             android:background="@drawable/bg_alert_button"
             android:backgroundTint="#FF6900"
             android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:textStyle="bold"
+            android:textSize="6sp"
+            android:textStyle="normal"
             android:textAllCaps="false"
             android:stateListAnimator="@null"
             android:text="Dismiss" />

@@ -24,6 +24,9 @@
         .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
         .grid { display: grid; gap: 16px; }
         .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+        .grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+        .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+        @media (max-width: 820px) { .grid.cols-5, .grid.cols-4, .grid.cols-3 { grid-template-columns: repeat(2, 1fr); } }
         .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
         table { width: 100%; border-collapse: collapse; }
         th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -32,6 +35,7 @@
         .badge.ONLINE, .badge.COMPLETED { background: rgba(53,208,127,.15); color: var(--ok); }
         .badge.OFFLINE { background: rgba(139,147,167,.15); color: var(--muted); }
         .badge.RECORDING, .badge.STARTING, .badge.STOPPING, .badge.PROCESSING { background: rgba(79,140,255,.15); color: var(--accent); }
+        .badge.ERROR, .badge.FAILED { background: rgba(255,92,92,.15); color: var(--danger); }
         .badge.ERROR, .badge.FAILED { background: rgba(255,92,92,.15); color: var(--danger); }
         .badge.PENDING { background: rgba(245,185,66,.15); color: var(--warn); }
         button, .btn { cursor: pointer; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); padding: 7px 14px; border-radius: 6px; font-size: 13px; }
@@ -117,6 +121,11 @@
      */
     window.realtimeReady = new Promise((resolve) => {
         const pusher = new Pusher(document.querySelector('meta[name="reverb-key"]').content, {
+            // Reverb is self-hosted, not Pusher Cloud, so there is no real
+            // cluster — but pusher-js 8.x throws "Options object must provide
+            // a cluster" unless one is present. Any non-empty value works
+            // because wsHost/wsPort below point the client straight at Reverb.
+            cluster: 'reverb',
             wsHost: window.location.hostname,
             wsPort: Number(document.querySelector('meta[name="reverb-port"]').content),
             wssPort: Number(document.querySelector('meta[name="reverb-port"]').content),

@@ -126,6 +126,95 @@ class RecordingLifecycleService
     }
 
     /**
+     * Create a VIDEO recording session and dispatch START_VIDEO. Mirrors
+     * start() but there is no audio config to resolve — the device records
+     * at a fixed 1080p profile. Idempotent per-device like start().
+     */
+    public function startVideo(Device $device): Recording
+    {
+        return DB::transaction(function () use ($device) {
+            $device = Device::query()->lockForUpdate()->findOrFail($device->id);
+
+            $active = $device->recordings()
+                ->whereNotIn('status', [RecordingStatus::COMPLETED, RecordingStatus::FAILED])
+                ->latest('id')
+                ->first();
+
+            if ($active) {
+                return $active;
+            }
+
+            if ($device->status === DeviceStatus::OFFLINE) {
+                throw new DeviceUnavailableException('Device is offline and cannot start a recording.');
+            }
+
+            $recording = Recording::query()->create([
+                'uuid' => (string) Str::uuid(),
+                'device_id' => $device->id,
+                'status' => RecordingStatus::STARTING,
+                'media_kind' => \App\Enums\MediaKind::VIDEO,
+                'preset' => RecordingPreset::HIGH,
+                'source' => RecordingSource::ADMIN,
+                'encoder' => 'h264',
+                'sample_rate' => 0,
+                'bitrate' => 0,
+                'channels' => 0,
+            ]);
+
+            $command = DeviceCommand::query()->create([
+                'device_id' => $device->id,
+                'recording_id' => $recording->id,
+                'command_id' => (string) Str::uuid(),
+                'command' => CommandType::START_VIDEO,
+                'payload' => ['quality' => '1080p'],
+                'status' => CommandStatus::SENT,
+                'sent_at' => now(),
+            ]);
+
+            $command->load(['device', 'recording']);
+            RecordingStartRequested::dispatch($command);
+
+            return $recording;
+        });
+    }
+
+    /**
+     * Dispatch STOP_VIDEO. Idempotent like stop().
+     */
+    public function stopVideo(Recording $recording): Recording
+    {
+        return DB::transaction(function () use ($recording) {
+            $recording = Recording::query()->lockForUpdate()->findOrFail($recording->id);
+
+            if (in_array($recording->status, [
+                RecordingStatus::STOPPING,
+                RecordingStatus::PROCESSING,
+                RecordingStatus::COMPLETED,
+                RecordingStatus::FAILED,
+            ], true)) {
+                return $recording;
+            }
+
+            $recording->forceFill(['status' => RecordingStatus::STOPPING])->save();
+
+            $command = DeviceCommand::query()->create([
+                'device_id' => $recording->device_id,
+                'recording_id' => $recording->id,
+                'command_id' => (string) Str::uuid(),
+                'command' => CommandType::STOP_VIDEO,
+                'payload' => [],
+                'status' => CommandStatus::SENT,
+                'sent_at' => now(),
+            ]);
+
+            $command->load(['device', 'recording']);
+            RecordingStopRequested::dispatch($command);
+
+            return $recording;
+        });
+    }
+
+    /**
      * Acknowledge that the device actually started capturing audio.
      * Records the *actual* configuration the device settled on, which may
      * differ from what was proposed if the proposed config was unsupported.

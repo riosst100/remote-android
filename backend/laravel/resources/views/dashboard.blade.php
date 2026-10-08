@@ -3,22 +3,31 @@
 @section('title', 'Dashboard')
 
 @section('content')
-<div class="grid cols-4" style="margin-bottom:24px;">
+<div class="grid cols-5" style="margin-bottom:24px;">
     <div class="card">
         <div class="stat">{{ $stats['total_devices'] }}</div>
         <div class="stat-label">Devices</div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">Total perangkat terdaftar</div>
     </div>
     <div class="card">
         <div class="stat" style="color:var(--ok);">{{ $stats['online_devices'] }}</div>
         <div class="stat-label">Online</div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">Terhubung &amp; siap menerima perintah</div>
     </div>
     <div class="card">
         <div class="stat" style="color:var(--accent);">{{ $stats['recording_devices'] }}</div>
         <div class="stat-label">Recording</div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">Sedang merekam audio</div>
     </div>
     <div class="card">
         <div class="stat" style="color:var(--muted);">{{ $stats['offline_devices'] }}</div>
         <div class="stat-label">Offline</div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">Tidak terhubung / tidak ada heartbeat</div>
+    </div>
+    <div class="card">
+        <div class="stat" style="color:var(--danger);">{{ $stats['error_devices'] }}</div>
+        <div class="stat-label">Error</div>
+        <div class="muted" style="font-size:12px;margin-top:4px;">Gagal merekam atau bermasalah</div>
     </div>
 </div>
 

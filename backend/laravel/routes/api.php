@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\DeviceErrorController;
 use App\Http\Controllers\Api\DeviceFlashController;
 use App\Http\Controllers\Api\DeviceRecordingController;
 use App\Http\Controllers\Api\DeviceScheduleController;
+use App\Http\Controllers\Api\DeviceSensorsController;
+use App\Http\Controllers\Api\DeviceSensorRulesController;
 use App\Http\Controllers\Api\RecordingChunkController;
 use App\Http\Controllers\Api\RecordingCompletionController;
 use App\Http\Controllers\Api\RecordingController;
@@ -28,6 +30,8 @@ Route::post('/devices/broadcasting/auth', [BroadcastAuthController::class, 'devi
 Route::middleware('device')->group(function () {
     Route::post('/devices/heartbeat', [DeviceController::class, 'heartbeat']);
     Route::post('/devices/error', DeviceErrorController::class);
+    Route::post('/devices/sensors', DeviceSensorsController::class)
+        ->middleware('throttle:120,1');
     Route::get('/devices/schedules', [DeviceScheduleController::class, 'index']);
     Route::post('/devices/recordings', [DeviceRecordingController::class, 'store'])
         ->middleware('throttle:30,1');
@@ -45,9 +49,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/devices/{device}/flash', [DeviceFlashController::class, 'store']);
     Route::post('/devices/{device}/alert', [DeviceAlertController::class, 'store']);
+    Route::post('/devices/{device}/alert/dismiss', [DeviceAlertController::class, 'dismiss']);
+    Route::post('/devices/{device}/sensor-rules', [DeviceSensorRulesController::class, 'store']);
 
     Route::post('/recordings/start', [RecordingController::class, 'start']);
     Route::post('/recordings/{recording:uuid}/stop', [RecordingController::class, 'stop']);
+    Route::post('/recordings/video/start', [RecordingController::class, 'startVideo']);
+    Route::post('/recordings/{recording:uuid}/video/stop', [RecordingController::class, 'stopVideo']);
     Route::get('/recordings', [RecordingController::class, 'index']);
     Route::get('/recordings/{recording:uuid}', [RecordingController::class, 'show']);
 });

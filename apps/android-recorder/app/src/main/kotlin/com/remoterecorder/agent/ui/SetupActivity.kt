@@ -41,9 +41,9 @@ class SetupActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var credentials: DeviceCredentialStore
 
-    private val requestMicPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    private val requestMicPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
         refreshStatus()
-        if (granted) {
+        if (results[Manifest.permission.RECORD_AUDIO] == true) {
             maybeStartServiceIfRegistered()
         }
     }
@@ -56,7 +56,7 @@ class SetupActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
 
         findViewById<Button>(R.id.permissionButton).setOnClickListener {
-            requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
+            requestMicPermission.launch(arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA))
         }
 
         findViewById<Button>(R.id.registerButton).setOnClickListener {

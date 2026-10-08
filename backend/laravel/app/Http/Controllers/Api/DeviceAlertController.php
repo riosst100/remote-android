@@ -33,4 +33,18 @@ class DeviceAlertController extends Controller
             'command' => $command->command->value,
         ]], 202);
     }
+
+    public function dismiss(Device $device): JsonResponse
+    {
+        try {
+            $command = $this->service->dismissAlert($device);
+        } catch (DeviceUnavailableException $e) {
+            return response()->json(['message' => $e->getMessage()], 409);
+        }
+
+        return response()->json(['data' => [
+            'command_id' => $command->command_id,
+            'command' => $command->command->value,
+        ]], 202);
+    }
 }

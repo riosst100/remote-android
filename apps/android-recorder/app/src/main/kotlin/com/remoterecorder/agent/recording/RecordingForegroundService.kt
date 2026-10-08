@@ -20,7 +20,6 @@ import com.remoterecorder.agent.network.ConnectionStatus
 import com.remoterecorder.agent.network.ReverbSocketClient
 import com.remoterecorder.agent.util.AgentLog
 import com.remoterecorder.agent.util.DeviceCredentialStore
-import com.remoterecorder.agent.util.LightSensorReader
 import com.remoterecorder.agent.util.PendingRecordingStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,17 +45,22 @@ class RecordingForegroundService : Service() {
     private lateinit var apiClient: ApiClient
     private lateinit var socketClient: ReverbSocketClient
     private lateinit var sessionManager: RecordingSessionManager
+    private lateinit var videoSessionManager: VideoSessionManager
     private lateinit var torchController: TorchController
     private lateinit var credentials: DeviceCredentialStore
+    private lateinit var sensorMonitor: SensorTelemetryMonitor
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
     private var heartbeatJob: Job? = null
+    private var sensorsStarted = false
 
     override fun onCreate() {
         super.onCreate()
         credentials = DeviceCredentialStore(this)
         apiClient = ApiClient { credentials.token }
         sessionManager = RecordingSessionManager(this, apiClient)
+        videoSessionManager = VideoSessionManager(this, apiClient)
         torchController = TorchController(this)
+        sensorMonitor = SensorTelemetryMonitor(this, apiClient, serviceScope)
 
         socketClient = ReverbSocketClient(
             tokenProvider = { credentials.token },
@@ -108,6 +112,13 @@ class RecordingForegroundService : Service() {
         socketClient.connect("private-devices.$serverDeviceId")
         startHeartbeatLoop()
 
+        // Idempotent: onStartCommand fires repeatedly, but telemetry should
+        // start once and keep running for the life of the service.
+        if (!sensorsStarted) {
+            sensorMonitor.start()
+            sensorsStarted = true
+        }
+
         return START_STICKY
     }
 
@@ -147,6 +158,7 @@ class RecordingForegroundService : Service() {
     override fun onDestroy() {
         heartbeatJob?.cancel()
         socketClient.disconnect()
+        sensorMonitor.stop()
         super.onDestroy()
     }
 
@@ -186,6 +198,26 @@ class RecordingForegroundService : Service() {
             return
         }
 
+        if (event == "DismissAlertCommandRequested") {
+            handleDismissAlertCommand(data)
+            return
+        }
+
+        // Audio and video start/stop share the same broadcast event names;
+        // the `command` field tells them apart (START_VIDEO vs START_RECORDING).
+        val commandKind = data.optString("command")
+
+        if (commandKind == "START_VIDEO" || commandKind == "STOP_VIDEO") {
+            val videoCommand = when (commandKind) {
+                "START_VIDEO" -> runCatching { Command.startVideoFromJson(data) }.getOrNull()
+                "STOP_VIDEO" -> runCatching { Command.stopVideoFromJson(data) }.getOrNull()
+                else -> null
+            } ?: return
+            videoSessionManager.handleCommand(videoCommand)
+            updateNotification(recording = sessionManager.isRecording() || videoSessionManager.isRecording())
+            return
+        }
+
         val command = when (event) {
             "RecordingStartRequested" -> runCatching { Command.startFromJson(data) }.getOrNull()
             "RecordingStopRequested" -> runCatching { Command.stopFromJson(data) }.getOrNull()
@@ -205,6 +237,10 @@ class RecordingForegroundService : Service() {
     private fun handleFlashCommand(command: Command, on: Boolean) {
         serviceScope.launch {
             val result = runCatching { torchController.setEnabled(on) }
+            if (result.isSuccess) {
+                ActuatorState.setFlashOn(on)
+                sensorMonitor.reportNow()
+            }
             val ackEvent = if (result.isSuccess) "flash_applied" else "flash_error"
             val errorMessage = result.exceptionOrNull()?.message
 
@@ -242,21 +278,9 @@ class RecordingForegroundService : Service() {
         val buttonLabel = data.optString("button_label").takeIf { it.isNotBlank() } ?: "Dismiss"
 
         serviceScope.launch {
-            val lux = LightSensorReader(this@RecordingForegroundService).readLuxBlocking()
-
-            // Only show the alert in a dark room. If the device has no light
-            // sensor (lux == null), show it anyway rather than silently never
-            // alerting. A lit room (lux at/above the threshold) skips the
-            // alert but still acks the command as handled.
-            val isDark = lux == null || lux < DARK_ROOM_LUX_THRESHOLD
-
-            if (!isDark) {
-                AgentLog.i("service", "Alert skipped: room is not dark (lux=$lux).")
-                ackAlert(commandId, "alert_shown")
-                return@launch
-            }
-
-            AgentLog.i("service", "Room is dark (lux=$lux); showing alert.")
+            // A manually-sent alert from the dashboard always shows, whatever
+            // the lighting. (Sensor-rule-triggered alerts apply their own lux
+            // condition before getting here.)
             val result = runCatching { showAlertNotification(title, message, volume, brightness, buttonLabel) }
             if (result.isFailure) {
                 AgentLog.e("service", "Failed to show alert", result.exceptionOrNull())
@@ -268,6 +292,20 @@ class RecordingForegroundService : Service() {
                 if (result.isFailure) "SERVICE_ERROR" else null,
                 result.exceptionOrNull()?.message,
             )
+        }
+    }
+
+    /**
+     * Closes a currently-showing alert popup on dashboard request by
+     * broadcasting [AlertActivity.ACTION_DISMISS], which the activity listens
+     * for and finishes itself. Acks either way so the command resolves.
+     */
+    private fun handleDismissAlertCommand(data: org.json.JSONObject) {
+        val commandId = data.optString("command_id").takeIf { it.isNotBlank() } ?: return
+        serviceScope.launch {
+            runCatching { com.remoterecorder.agent.ui.AlertActivity.dismissVisible() }
+                .onFailure { AgentLog.e("service", "Failed to dismiss alert", it) }
+            ackAlert(commandId, "alert_dismissed")
         }
     }
 

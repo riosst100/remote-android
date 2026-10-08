@@ -71,6 +71,8 @@ class RecordingSessionManager(
             // they're handled directly in RecordingForegroundService.
             // Guarded here only to keep the when exhaustive.
             CommandType.FLASH_ON, CommandType.FLASH_OFF, CommandType.SHOW_ALERT -> Unit
+            // Video commands are handled by VideoSessionManager, never here.
+            CommandType.START_VIDEO, CommandType.STOP_VIDEO -> Unit
         }
     }
 

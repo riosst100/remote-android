@@ -38,6 +38,26 @@ class RecordingController extends Controller
         return response()->json(['data' => new RecordingResource($recording->fresh())]);
     }
 
+    public function startVideo(Request $request): JsonResponse
+    {
+        $device = Device::query()->findOrFail($request->integer('device_id'));
+
+        try {
+            $recording = $this->lifecycle->startVideo($device);
+        } catch (DeviceUnavailableException $e) {
+            return response()->json(['message' => $e->getMessage()], 409);
+        }
+
+        return response()->json(['data' => new RecordingResource($recording->fresh())], 201);
+    }
+
+    public function stopVideo(Recording $recording): JsonResponse
+    {
+        $recording = $this->lifecycle->stopVideo($recording);
+
+        return response()->json(['data' => new RecordingResource($recording->fresh())]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = Recording::query()->with('device')->withCount('chunks')->latest('id');

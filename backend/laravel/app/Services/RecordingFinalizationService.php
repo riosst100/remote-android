@@ -57,11 +57,21 @@ class RecordingFinalizationService
                 $disk = config('recorder.storage_disk');
                 $storage = Storage::disk($disk);
                 $finalDir = $this->paths->finalDirectoryFor($recording->uuid, $recording->created_at);
-                $mimeType = $chunks->first()?->mime_type ?? 'application/octet-stream';
+                $isVideo = $recording->media_kind === \App\Enums\MediaKind::VIDEO;
+                $mimeType = $isVideo
+                    ? 'video/mp4'
+                    : ($chunks->first()?->mime_type ?? 'application/octet-stream');
                 $finalPath = "{$finalDir}/final.".$this->extensionFor($mimeType);
 
                 $storage->makeDirectory($finalDir);
-                $this->concatenateChunks($storage, $chunks, $finalPath);
+
+                // Audio parts (AAC-ADTS/Ogg) byte-concatenate cleanly; MP4
+                // parts cannot, so they are remuxed together with ffmpeg.
+                if ($isVideo) {
+                    $this->concatenateVideoChunks($storage, $chunks, $finalPath);
+                } else {
+                    $this->concatenateChunks($storage, $chunks, $finalPath);
+                }
 
                 $recording->forceFill([
                     'status' => RecordingStatus::COMPLETED,
@@ -121,6 +131,72 @@ class RecordingFinalizationService
         fclose($stream);
     }
 
+    /**
+     * Concatenates MP4 parts into one file using ffmpeg's concat demuxer.
+     * Parts recorded back-to-back with identical encoding parameters are
+     * stream-copied (no re-encode), so this is fast and lossless. Chunk
+     * files are copied out of the storage disk to local temp paths first,
+     * since ffmpeg needs real filesystem paths (the disk may be remote).
+     */
+    private function concatenateVideoChunks($storage, $chunks, string $finalPath): void
+    {
+        $ffmpeg = config('recorder.ffmpeg_path', 'ffmpeg');
+        $tmpDir = sys_get_temp_dir().'/vidmerge_'.uniqid();
+
+        if (! @mkdir($tmpDir, 0700, true) && ! is_dir($tmpDir)) {
+            throw new FinalizationException('Unable to create temp directory for video merge.');
+        }
+
+        $localParts = [];
+        try {
+            foreach ($chunks as $chunk) {
+                $local = "{$tmpDir}/part_{$chunk->chunk_number}.mp4";
+                $in = $storage->readStream($chunk->file_path);
+                if ($in === null) {
+                    throw new FinalizationException("Missing chunk file for chunk {$chunk->chunk_number}.");
+                }
+                $out = fopen($local, 'wb');
+                stream_copy_to_stream($in, $out);
+                fclose($in);
+                fclose($out);
+                $localParts[] = $local;
+            }
+
+            // ffmpeg concat-demuxer list file.
+            $listPath = "{$tmpDir}/list.txt";
+            file_put_contents(
+                $listPath,
+                collect($localParts)->map(fn ($p) => "file '".str_replace("'", "'\\''", $p)."'")->implode("\n")
+            );
+
+            $localFinal = "{$tmpDir}/final.mp4";
+            $cmd = [
+                $ffmpeg, '-y', '-f', 'concat', '-safe', '0',
+                '-i', $listPath, '-c', 'copy', '-movflags', '+faststart', $localFinal,
+            ];
+
+            $process = new \Symfony\Component\Process\Process($cmd);
+            $process->setTimeout(600);
+            $process->run();
+
+            if (! $process->isSuccessful() || ! is_file($localFinal)) {
+                throw new FinalizationException('ffmpeg failed to merge video parts: '.substr($process->getErrorOutput(), 0, 500));
+            }
+
+            // Stream the merged file back onto the storage disk.
+            $final = fopen($localFinal, 'rb');
+            $storage->writeStream($finalPath, $final);
+            if (is_resource($final)) {
+                fclose($final);
+            }
+        } finally {
+            foreach (glob("{$tmpDir}/*") ?: [] as $f) {
+                @unlink($f);
+            }
+            @rmdir($tmpDir);
+        }
+    }
+
     private function assertContiguousSequence($chunks): void
     {
         if ($chunks->isEmpty()) {
@@ -165,6 +241,7 @@ class RecordingFinalizationService
         $mimeType = strtolower($mimeType);
 
         return match (true) {
+            str_contains($mimeType, 'mp4'), str_contains($mimeType, 'video') => 'mp4',
             str_contains($mimeType, 'aac') => 'aac',
             str_contains($mimeType, 'opus'), str_contains($mimeType, 'ogg') => 'ogg',
             str_contains($mimeType, 'flac') => 'flac',

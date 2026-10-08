@@ -20,6 +20,7 @@ class DashboardController extends Controller
             'online_devices' => $devices->where('status', DeviceStatus::ONLINE)->count(),
             'recording_devices' => $devices->where('status', DeviceStatus::RECORDING)->count(),
             'offline_devices' => $devices->where('status', DeviceStatus::OFFLINE)->count(),
+            'error_devices' => $devices->where('status', DeviceStatus::ERROR)->count(),
             'active_recordings' => Recording::query()->whereNotIn('status', [RecordingStatus::COMPLETED, RecordingStatus::FAILED])->count(),
             'completed_recordings' => Recording::query()->where('status', RecordingStatus::COMPLETED)->count(),
         ];
