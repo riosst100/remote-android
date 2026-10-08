@@ -125,6 +125,8 @@ jobs:
     steps:
       - name: Check signing secrets
         id: signing
+        # Runs before checkout, when apps/android-recorder does not exist yet.
+        working-directory: ${{ github.workspace }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "::warning::ANDROID_KEYSTORE_BASE64 is not set — skipping the release APK. Only an APK signed with the original keystore can update installed agents."
