@@ -26,6 +26,11 @@ class DeviceSensorRulesController extends Controller
                         'lux_op' => $when['lux_op'] ?? null,
                         'lux_value' => isset($when['lux_value']) ? (float) $when['lux_value'] : null,
                         'proximity' => $when['proximity'] ?? null,
+                        'days' => ! empty($when['days'])
+                            ? array_values(array_unique(array_map('intval', $when['days'])))
+                            : null,
+                        'time_from' => $when['time_from'] ?? null,
+                        'time_to' => $when['time_to'] ?? null,
                     ],
                 ];
 

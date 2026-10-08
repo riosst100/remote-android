@@ -17,7 +17,7 @@ class SaveSensorRulesRequest extends FormRequest
         return [
             'rules' => ['present', 'array', 'max:20'],
 
-            'rules.*.action' => ['required', Rule::in(['POPUP', 'FLASH_ON', 'FLASH_OFF'])],
+            'rules.*.action' => ['required', Rule::in(['POPUP', 'FLASH_ON', 'FLASH_OFF', 'VIDEO_START', 'VIDEO_STOP'])],
 
             // Conditions — all provided ones must hold (AND). Any omitted/null
             // condition is ignored by the device.
@@ -26,6 +26,13 @@ class SaveSensorRulesRequest extends FormRequest
             'rules.*.when.lux_op' => ['nullable', Rule::in(['lt', 'gt'])],
             'rules.*.when.lux_value' => ['nullable', 'numeric', 'min:0', 'required_with:rules.*.when.lux_op'],
             'rules.*.when.proximity' => ['nullable', Rule::in(['near', 'far'])],
+
+            // Optional day/time window — the rule only applies on these
+            // weekdays (0 = Sunday) and inside [time_from, time_to).
+            'rules.*.when.days' => ['nullable', 'array'],
+            'rules.*.when.days.*' => ['integer', 'between:0,6'],
+            'rules.*.when.time_from' => ['nullable', 'date_format:H:i', 'required_with:rules.*.when.time_to'],
+            'rules.*.when.time_to' => ['nullable', 'date_format:H:i', 'required_with:rules.*.when.time_from'],
 
             // Popup copy — only meaningful (and required) when action is POPUP.
             'rules.*.popup' => ['nullable', 'array'],

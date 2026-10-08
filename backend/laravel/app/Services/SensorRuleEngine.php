@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Enums\MediaKind;
+use App\Enums\RecordingStatus;
 use App\Exceptions\DeviceUnavailableException;
 use App\Models\Device;
 use Illuminate\Support\Facades\Cache;
@@ -23,6 +25,7 @@ class SensorRuleEngine
     public function __construct(
         private readonly DeviceFlashService $flash,
         private readonly DeviceAlertService $alerts,
+        private readonly RecordingLifecycleService $recordings,
     ) {}
 
     /**
@@ -70,6 +73,13 @@ class SensorRuleEngine
      */
     private function matches(array $when, array $sensors): bool
     {
+        // Day-of-week / time-of-day gate: when set, the rule only applies on
+        // the listed weekdays and inside the [from, to) window. Evaluated
+        // first so an out-of-schedule rule costs nothing else.
+        if (! $this->withinSchedule($when)) {
+            return false;
+        }
+
         if (! empty($when['motion']) && ($sensors['motion'] ?? null) !== $when['motion']) {
             return false;
         }
@@ -90,6 +100,46 @@ class SensorRuleEngine
                 return false;
             }
             if ((bool) $sensors['proximity_near'] !== ($when['proximity'] === 'near')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks the current time against a rule's optional day/time window.
+     * No days and no time range means "always". Days are Carbon weekday
+     * numbers (0 = Sunday). A from <= to window is same-day and end-exclusive
+     * (04:00–05:00); from > to wraps past midnight (22:00–05:00). Evaluated
+     * in the configured rule timezone so the hours mean local wall-clock time.
+     *
+     * @param  array<string, mixed>  $when
+     */
+    private function withinSchedule(array $when): bool
+    {
+        $days = $when['days'] ?? null;
+        $from = $when['time_from'] ?? null;
+        $to = $when['time_to'] ?? null;
+
+        if (empty($days) && blank($from) && blank($to)) {
+            return true;
+        }
+
+        $now = now(config('recorder.rule_timezone', config('app.timezone')));
+
+        if (! empty($days) && ! in_array((int) $now->dayOfWeek, array_map('intval', $days), true)) {
+            return false;
+        }
+
+        if (! blank($from) && ! blank($to)) {
+            $current = $now->format('H:i');
+            if ($from <= $to) {
+                if ($current < $from || $current >= $to) {
+                    return false;
+                }
+            } elseif ($current < $from && $current >= $to) {
+                // Overnight window: outside only when before `from` AND at/after `to`.
                 return false;
             }
         }
@@ -134,6 +184,32 @@ class SensorRuleEngine
                         (int) ($defaults['brightness'] ?? 100),
                         rememberDefaults: false,
                     );
+
+                    return true;
+
+                case 'VIDEO_START':
+                    // Skip if a video is already capturing (manual or a prior
+                    // rule); startVideo is idempotent per device either way.
+                    if (! empty($sensors['video_recording'])) {
+                        return false;
+                    }
+                    $this->recordings->startVideo($device);
+
+                    return true;
+
+                case 'VIDEO_STOP':
+                    if (empty($sensors['video_recording'])) {
+                        return false;
+                    }
+                    $active = $device->recordings()
+                        ->where('media_kind', MediaKind::VIDEO)
+                        ->whereNotIn('status', [RecordingStatus::COMPLETED, RecordingStatus::FAILED])
+                        ->latest('id')
+                        ->first();
+                    if (! $active) {
+                        return false;
+                    }
+                    $this->recordings->stopVideo($active);
 
                     return true;
             }

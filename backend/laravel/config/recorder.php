@@ -28,4 +28,9 @@ return [
     // Defaults to "ffmpeg" on PATH; override in .env where it lives elsewhere
     // (e.g. a Windows build during local WSL development).
     'ffmpeg_path' => env('RECORDER_FFMPEG_PATH', 'ffmpeg'),
+
+    // Timezone used to evaluate sensor-rule day/time windows, so "04:00–05:00"
+    // means local wall-clock time rather than the server's UTC. Set this to
+    // the devices' local zone, e.g. RECORDER_RULE_TIMEZONE=Asia/Jakarta.
+    'rule_timezone' => env('RECORDER_RULE_TIMEZONE', config('app.timezone')),
 ];

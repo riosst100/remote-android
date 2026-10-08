@@ -8,6 +8,7 @@ use App\Events\DeviceSensorsUpdated;
 use App\Events\FlashCommandRequested;
 use App\Models\Device;
 use App\Models\User;
+use App\Services\RecordingLifecycleService;
 use App\Services\SensorRuleEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -126,6 +127,65 @@ class SensorRulesTest extends TestCase
 
         Event::assertDispatched(AlertCommandRequested::class, fn ($e) => $e->command->payload['volume'] === 35
             && $e->command->payload['brightness'] === 60);
+    }
+
+    public function test_video_start_rule_starts_a_video_recording(): void
+    {
+        $this->rules([$this->flashRule('VIDEO_START', ['motion' => 'PICKED_UP'])]);
+
+        $this->report(['motion' => 'PICKED_UP', 'video_recording' => false]);
+
+        $this->assertDatabaseHas('device_commands', ['device_id' => $this->device->id, 'command' => 'START_VIDEO']);
+        $this->assertDatabaseHas('recordings', ['device_id' => $this->device->id, 'media_kind' => 'VIDEO']);
+    }
+
+    public function test_video_start_rule_is_skipped_when_already_recording(): void
+    {
+        $this->rules([$this->flashRule('VIDEO_START', ['motion' => 'PICKED_UP'])]);
+
+        $this->report(['motion' => 'PICKED_UP', 'video_recording' => true]);
+
+        $this->assertDatabaseMissing('device_commands', ['device_id' => $this->device->id, 'command' => 'START_VIDEO']);
+    }
+
+    public function test_video_stop_rule_stops_the_active_video_recording(): void
+    {
+        app(RecordingLifecycleService::class)->startVideo($this->device->fresh());
+        $this->rules([$this->flashRule('VIDEO_STOP', ['motion' => 'PUT_DOWN'])]);
+
+        $this->report(['motion' => 'PUT_DOWN', 'video_recording' => true]);
+
+        $this->assertDatabaseHas('device_commands', ['device_id' => $this->device->id, 'command' => 'STOP_VIDEO']);
+    }
+
+    public function test_scheduled_rule_only_fires_within_its_day_and_time_window(): void
+    {
+        $rule = $this->flashRule('FLASH_ON', ['motion' => 'PICKED_UP']);
+        $rule['when']['days'] = [0]; // Sunday
+        $rule['when']['time_from'] = '04:00';
+        $rule['when']['time_to'] = '05:00';
+        $this->rules([$rule]);
+
+        // Sunday (2026-10-11), but 06:00 — right day, outside the window.
+        $this->travelTo('2026-10-11 06:00:00');
+        $this->report(['motion' => 'PICKED_UP', 'flash_on' => false]);
+        Event::assertNotDispatched(FlashCommandRequested::class);
+
+        // Sunday 04:30 — inside the window.
+        $this->travelTo('2026-10-11 04:30:00');
+        $this->report(['motion' => 'PICKED_UP', 'flash_on' => false]);
+        Event::assertDispatchedTimes(FlashCommandRequested::class, 1);
+    }
+
+    public function test_scheduled_rule_skips_the_wrong_weekday(): void
+    {
+        $rule = $this->flashRule('FLASH_ON', ['motion' => 'PICKED_UP']);
+        $rule['when']['days'] = [0]; // Sunday only
+        $this->rules([$rule]);
+
+        $this->travelTo('2026-10-12 04:30:00'); // Monday
+        $this->report(['motion' => 'PICKED_UP', 'flash_on' => false]);
+        Event::assertNotDispatched(FlashCommandRequested::class);
     }
 
     public function test_rules_saved_from_the_dashboard_are_evaluated(): void

@@ -112,6 +112,8 @@
                         <option value="POPUP">Show Popup</option>
                         <option value="FLASH_ON">Flash On</option>
                         <option value="FLASH_OFF">Flash Off</option>
+                        <option value="VIDEO_START">Start Video Recording</option>
+                        <option value="VIDEO_STOP">Stop Video Recording</option>
                     </select>
                 </label>
                 <label style="font-size:12px;color:var(--muted);">Motion
@@ -146,6 +148,24 @@
                 <input type="text" class="rule-popup-title" placeholder="Popup title" maxlength="120" style="flex:1;min-width:160px;">
                 <input type="text" class="rule-popup-message" placeholder="Popup message" maxlength="1000" style="flex:2;min-width:200px;">
             </div>
+            <div class="rule-schedule-fields" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
+                <label style="font-size:12px;color:var(--muted);">Active days
+                    <span style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
+                        @foreach (['Sun' => 0, 'Mon' => 1, 'Tue' => 2, 'Wed' => 3, 'Thu' => 4, 'Fri' => 5, 'Sat' => 6] as $lbl => $d)
+                        <label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;color:var(--text);">
+                            <input type="checkbox" class="rule-day" value="{{ $d }}"> {{ $lbl }}
+                        </label>
+                        @endforeach
+                    </span>
+                </label>
+                <label style="font-size:12px;color:var(--muted);">From
+                    <input type="time" class="rule-time-from" style="display:block;margin-top:2px;">
+                </label>
+                <label style="font-size:12px;color:var(--muted);">To
+                    <input type="time" class="rule-time-to" style="display:block;margin-top:2px;">
+                </label>
+            </div>
+            <p class="muted" style="font-size:11px;margin:6px 0 0;">Leave days unchecked and times blank to apply at all times. Both times must be set together; times are {{ config('recorder.rule_timezone', config('app.timezone')) }} and a From later than To means an overnight window.</p>
         </div>
     </template>
 </div>
@@ -438,6 +458,12 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
             row.querySelector('.rule-lux-op').value = w.lux_op ?? '';
             row.querySelector('.rule-lux-value').value = (w.lux_value ?? '') === null ? '' : (w.lux_value ?? '');
             row.querySelector('.rule-proximity').value = w.proximity ?? '';
+            (w.days ?? []).forEach((d) => {
+                const cb = row.querySelector(`.rule-day[value="${d}"]`);
+                if (cb) cb.checked = true;
+            });
+            row.querySelector('.rule-time-from').value = w.time_from ?? '';
+            row.querySelector('.rule-time-to').value = w.time_to ?? '';
             const p = rule.popup ?? {};
             row.querySelector('.rule-popup-title').value = p.title ?? '';
             row.querySelector('.rule-popup-message').value = p.message ?? '';
@@ -452,6 +478,7 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
         const action = row.querySelector('.rule-action').value;
         const luxOp = row.querySelector('.rule-lux-op').value || null;
         const luxVal = row.querySelector('.rule-lux-value').value;
+        const days = Array.from(row.querySelectorAll('.rule-day:checked')).map((c) => Number(c.value));
         const rule = {
             action,
             when: {
@@ -459,6 +486,9 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
                 lux_op: luxOp,
                 lux_value: luxOp && luxVal !== '' ? Number(luxVal) : null,
                 proximity: row.querySelector('.rule-proximity').value || null,
+                days: days.length ? days : null,
+                time_from: row.querySelector('.rule-time-from').value || null,
+                time_to: row.querySelector('.rule-time-to').value || null,
             },
         };
         if (action === 'POPUP') {
