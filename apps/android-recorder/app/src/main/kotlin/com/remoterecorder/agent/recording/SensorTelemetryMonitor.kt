@@ -7,10 +7,14 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import com.remoterecorder.agent.network.ApiClient
 import com.remoterecorder.agent.util.AgentLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -39,6 +43,10 @@ class SensorTelemetryMonitor(
     private val lightSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
     private val accelSensor = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val proximitySensor = sensorManager?.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var tickerJob: Job? = null
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -77,6 +85,7 @@ class SensorTelemetryMonitor(
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
+    @Suppress("WakelockTimeout") // Held for the whole monitoring lifetime by design; released in stop().
     fun start() {
         val manager = sensorManager ?: run {
             AgentLog.w("sensors", "No SensorManager; telemetry disabled.")
@@ -85,6 +94,31 @@ class SensorTelemetryMonitor(
         lightSensor?.let { manager.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL, handler) }
         proximitySensor?.let { manager.registerListener(listener, it, SensorManager.SENSOR_DELAY_NORMAL, handler) }
         accelSensor?.let { manager.registerListener(listener, it, SensorManager.SENSOR_DELAY_UI, handler) }
+
+        // Keep the CPU awake while monitoring. The ambient-light and other
+        // non-wake-up sensors stop delivering — and coroutine timers stop
+        // firing — once the AP suspends with the screen off/Doze; a partial
+        // wake lock holds the CPU so both the periodic report below and the
+        // sensor callbacks keep working with the screen off. (Battery cost is
+        // deliberate: the device is meant to keep reporting while dark/idle.)
+        if (wakeLock == null) {
+            wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)?.apply {
+                setReferenceCounted(false)
+                runCatching { acquire() }
+            }
+        }
+
+        // Periodic snapshot so the server keeps getting every sensor even when
+        // nothing changes — the light sensor is silent on a still phone, so
+        // without this a "dark for N seconds" rule would never see the dark.
+        tickerJob?.cancel()
+        tickerJob = scope.launch {
+            while (isActive) {
+                delay(REPORT_INTERVAL_MS)
+                handler.post { sendReport() }
+            }
+        }
+
         AgentLog.i(
             "sensors",
             "Telemetry started (light=${lightSensor != null}, accel=${accelSensor != null}, proximity=${proximitySensor != null}).",
@@ -92,7 +126,11 @@ class SensorTelemetryMonitor(
     }
 
     fun stop() {
+        tickerJob?.cancel()
+        tickerJob = null
         sensorManager?.unregisterListener(listener)
+        wakeLock?.let { if (it.isHeld) runCatching { it.release() } }
+        wakeLock = null
     }
 
     private fun onAccel(values: FloatArray) {
@@ -185,5 +223,7 @@ class SensorTelemetryMonitor(
     private companion object {
         const val MOVING_THRESHOLD = 1.2f // m/s^2 away from gravity to count as motion
         const val SETTLE_MS = 1_500L // window after last motion still reported as PUT_DOWN
+        const val REPORT_INTERVAL_MS = 3_000L // forced full-sensor snapshot cadence (screen on or off)
+        const val WAKE_LOCK_TAG = "RemoteRecorder:sensors"
     }
 }
