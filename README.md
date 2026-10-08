@@ -370,3 +370,33 @@ parsing). The following require a real device/emulator and are not automated:
   Android agent's chunked recorder currently implements the AAC/ADTS `MediaRecorder` path only;
   wiring FLAC/Opus would mean swapping in a `MediaCodec`-based encoder behind the same
   `ChunkingAudioRecorder` interface.
+
+---
+
+## 12. CI / CD (GitHub Actions)
+
+`.github/workflows/ci-cd.yml` runs on every push to `master`, on pull requests, and manually
+(**Actions → CI / CD → Run workflow**).
+
+| Job | When | What |
+|---|---|---|
+| Backend tests | always | `composer install` + `php artisan test` (in-memory SQLite) |
+| Android build & unit tests | always | `:app:testDebugUnitTest :app:assembleDebug`, debug APK uploaded as an artifact |
+| Deploy backend to VPS | push to `master` touching `backend/**` or `scripts/deploy.sh` (or manual `deploy_backend`) | SSH → `git reset --hard origin/master` → `scripts/deploy.sh` (composer, migrate, optimize, reload php-fpm, restart Reverb + queue via supervisor) |
+| Publish release APK | push to `master` touching `apps/android-recorder/**` (or manual `publish_apk`), only if the keystore secret is set | signed `assembleRelease` → `scripts/publish-apk.sh` replaces `public/downloads/app-latest.apk`, keeping the old one as `app-latest.apk.bak-<timestamp>` |
+
+Deploy jobs only run after both test jobs pass. Remember to bump `versionCode`/`versionName`
+in `app/build.gradle.kts` for every APK you want devices to update to.
+
+**Repository secrets / variables** (Settings → Secrets and variables → Actions):
+
+- Secrets: `VPS_HOST`, `VPS_USER`, `VPS_PORT` (optional, default 22), `VPS_SSH_KEY` (private key
+  whose public key is in the server user's `authorized_keys`).
+- Release-APK secrets (optional): `ANDROID_KEYSTORE_BASE64` (`base64 -w0 release.jks`),
+  `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Must be the
+  **same keystore** the currently installed APKs were signed with, or devices can't update.
+- Variables (optional): `APP_DIR` (default `/var/www/html/remote-android`), `PHP_FPM_SERVICE`
+  (default `php8.3-fpm`).
+
+> Never run `php artisan test` on the production server: `ApkDownloadTest` deletes
+> `public/downloads/app-latest.apk`.
