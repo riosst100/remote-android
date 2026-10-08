@@ -94,7 +94,7 @@
         <h3 style="margin:0;">Sensor Automation</h3>
         <span id="rules-status" class="muted" style="font-size:12px;"></span>
     </div>
-    <p class="muted" style="margin-top:4px;">Rules the device evaluates locally against its live sensors. All conditions in a rule must hold (AND); leave a condition blank to ignore it. The action fires once each time the conditions become true.</p>
+    <p class="muted" style="margin-top:4px;">Rules the server checks against every live sensor reading from the device. All conditions in a rule must hold (AND); leave a condition blank to ignore it. The action fires once each time the conditions become true, so the manual Flash/Alert controls keep working: a rule won't undo a manual change until its conditions clear and hold again.</p>
 
     <div id="rules-list" style="margin-top:12px;"></div>
 
@@ -481,7 +481,7 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
                 method: 'POST',
                 body: JSON.stringify({ rules: collect() }),
             });
-            statusEl.textContent = 'saved — device picks it up on next heartbeat';
+            statusEl.textContent = 'saved — applies from the next sensor reading';
             window.showToast('Sensor rules saved.');
         } catch (err) {
             window.showToast(err.message, true);

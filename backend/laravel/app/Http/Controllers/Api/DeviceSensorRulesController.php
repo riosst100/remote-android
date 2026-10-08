@@ -8,8 +8,8 @@ use App\Models\Device;
 use Illuminate\Http\JsonResponse;
 
 /**
- * Saves the per-device sensor-automation rules. The device picks them up on
- * its next heartbeat and evaluates them locally against live sensor data.
+ * Saves the per-device sensor-automation rules. They are evaluated server-side
+ * against each sensor report the device sends (see SensorRuleEngine).
  */
 class DeviceSensorRulesController extends Controller
 {

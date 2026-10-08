@@ -18,8 +18,11 @@ class DeviceAlertService
      * Dispatch a SHOW_ALERT command carrying a title + message. The device
      * shows a full-screen alert with an alarm sound until the user dismisses
      * it. Fire-and-forget, same shape as the flash command.
+     *
+     * $rememberDefaults is false for sensor-rule popups, so an automated
+     * alert never overwrites what the admin last typed into the manual form.
      */
-    public function sendAlert(Device $device, string $title, string $message, int $volume = 100, int $brightness = 100, string $buttonLabel = 'Dismiss'): DeviceCommand
+    public function sendAlert(Device $device, string $title, string $message, int $volume = 100, int $brightness = 100, string $buttonLabel = 'Dismiss', bool $rememberDefaults = true): DeviceCommand
     {
         if ($device->status === DeviceStatus::OFFLINE) {
             throw new DeviceUnavailableException('Device is offline and cannot show an alert.');
@@ -31,15 +34,17 @@ class DeviceAlertService
 
         // Remember the settings on the device so the dashboard form can
         // pre-fill them next time without the admin re-entering anything.
-        $device->forceFill([
-            'alert_defaults' => [
-                'title' => $title,
-                'message' => $message,
-                'volume' => $volume,
-                'brightness' => $brightness,
-                'button_label' => $buttonLabel,
-            ],
-        ])->save();
+        if ($rememberDefaults) {
+            $device->forceFill([
+                'alert_defaults' => [
+                    'title' => $title,
+                    'message' => $message,
+                    'volume' => $volume,
+                    'brightness' => $brightness,
+                    'button_label' => $buttonLabel,
+                ],
+            ])->save();
+        }
 
         $command = DeviceCommand::query()->create([
             'device_id' => $device->id,
