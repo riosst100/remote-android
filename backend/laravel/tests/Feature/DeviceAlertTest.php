@@ -158,4 +158,23 @@ class DeviceAlertTest extends TestCase
 
         $this->assertSame(CommandStatus::COMPLETED, $command->fresh()->status);
     }
+
+    public function test_admin_can_save_alert_volume_and_brightness_without_sending(): void
+    {
+        Event::fake([AlertCommandRequested::class]);
+        $this->actingAsAdmin();
+        $device = Device::factory()->create(['alert_defaults' => ['title' => 'Keep me', 'volume' => 100]]);
+
+        $this->postJson("/api/devices/{$device->id}/alert/defaults", ['volume' => 40, 'brightness' => 25])
+            ->assertOk();
+
+        $defaults = $device->fresh()->alert_defaults;
+        $this->assertSame(40, $defaults['volume']);
+        $this->assertSame(25, $defaults['brightness']);
+        $this->assertSame('Keep me', $defaults['title']);
+        Event::assertNotDispatched(AlertCommandRequested::class);
+
+        $this->postJson("/api/devices/{$device->id}/alert/defaults", ['volume' => 150, 'brightness' => 25])
+            ->assertStatus(422);
+    }
 }

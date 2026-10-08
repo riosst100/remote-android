@@ -113,6 +113,21 @@ class SensorRulesTest extends TestCase
         $this->assertSame('Manual', $this->device->fresh()->alert_defaults['title']);
     }
 
+    public function test_popup_rule_uses_the_dashboard_alert_volume_and_brightness(): void
+    {
+        $this->device->forceFill(['alert_defaults' => ['volume' => 35, 'brightness' => 60]])->save();
+        $this->rules([[
+            'action' => 'POPUP',
+            'when' => ['motion' => 'PICKED_UP', 'lux_op' => null, 'lux_value' => null, 'proximity' => null],
+            'popup' => ['title' => 'Hey', 'message' => 'Put it back'],
+        ]]);
+
+        $this->report(['motion' => 'PICKED_UP', 'popup_shown' => false]);
+
+        Event::assertDispatched(AlertCommandRequested::class, fn ($e) => $e->command->payload['volume'] === 35
+            && $e->command->payload['brightness'] === 60);
+    }
+
     public function test_rules_saved_from_the_dashboard_are_evaluated(): void
     {
         $this->actingAs(User::factory()->create(), 'web');

@@ -33,8 +33,6 @@ class DeviceSensorRulesController extends Controller
                     $normalized['popup'] = [
                         'title' => $rule['popup']['title'],
                         'message' => $rule['popup']['message'],
-                        'volume' => (int) ($rule['popup']['volume'] ?? 100),
-                        'brightness' => (int) ($rule['popup']['brightness'] ?? 100),
                     ];
                 }
 

@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FileOutputOptions
@@ -45,6 +46,7 @@ class VideoRecorder(
     override val lifecycle: Lifecycle get() = lifecycleRegistry
 
     private var cameraProvider: ProcessCameraProvider? = null
+    @Volatile private var camera: Camera? = null
     private var activeRecording: Recording? = null
     private var outputFile: File? = null
 
@@ -94,7 +96,7 @@ class VideoRecorder(
                     val videoCapture = VideoCapture.withOutput(recorder)
 
                     provider.unbindAll()
-                    provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCapture)
+                    camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, videoCapture)
 
                     val outputOptions = FileOutputOptions.Builder(file).build()
                     activeRecording = videoCapture.output
@@ -157,6 +159,7 @@ class VideoRecorder(
         val teardown = CountDownLatch(1)
         mainExecutor.execute {
             activeRecording = null
+            camera = null
             runCatching {
                 cameraProvider?.unbindAll()
                 lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
@@ -168,5 +171,23 @@ class VideoRecorder(
         if (!finalized) AgentLog.w("video", "Finalize timed out; using whatever was written.")
 
         return file.takeIf { it.exists() && it.length() > 0 }
+    }
+
+    /**
+     * Toggles the torch on the camera this session already holds, so the
+     * flashlight can light the scene while video is recording. This goes
+     * through the bound session's CameraControl rather than a second
+     * Camera2 client (which the OS rejects as CAMERA_IN_USE while capture
+     * owns the camera). Returns false if there is no active camera to drive.
+     */
+    fun setTorch(enabled: Boolean, timeoutMs: Long = 2_000): Boolean {
+        val control = camera?.cameraControl ?: return false
+        return runCatching {
+            control.enableTorch(enabled).get(timeoutMs, TimeUnit.MILLISECONDS)
+            true
+        }.getOrElse {
+            AgentLog.w("video", "enableTorch($enabled) failed", it)
+            false
+        }
     }
 }

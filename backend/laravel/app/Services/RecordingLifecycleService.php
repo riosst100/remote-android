@@ -103,6 +103,8 @@ class RecordingLifecycleService
                 RecordingStatus::COMPLETED,
                 RecordingStatus::FAILED,
             ], true)) {
+                $this->abandonIfStopNeverReceived($recording, CommandType::STOP_RECORDING);
+
                 return $recording;
             }
 
@@ -192,6 +194,8 @@ class RecordingLifecycleService
                 RecordingStatus::COMPLETED,
                 RecordingStatus::FAILED,
             ], true)) {
+                $this->abandonIfStopNeverReceived($recording, CommandType::STOP_VIDEO);
+
                 return $recording;
             }
 
@@ -339,5 +343,49 @@ class RecordingLifecycleService
             });
 
         return $count;
+    }
+
+    /**
+     * A repeated Stop on a STOPPING recording whose stop command the device
+     * never even received (a dropped websocket push) fails the recording
+     * at once, rather than leaving the dashboard stuck until the 30-minute
+     * stuck-recording sweep. A stop the device did receive is left alone:
+     * it may still be finalizing or uploading.
+     */
+    private function abandonIfStopNeverReceived(Recording $recording, CommandType $stopType): void
+    {
+        if ($recording->status !== RecordingStatus::STOPPING) {
+            return;
+        }
+
+        $stop = DeviceCommand::query()
+            ->where('recording_id', $recording->id)
+            ->where('command', $stopType)
+            ->latest('id')
+            ->first();
+
+        $grace = config('recorder.unreceived_stop_grace_seconds', 60);
+        if (! $stop || $stop->received_at || $stop->sent_at?->gt(now()->subSeconds($grace))) {
+            return;
+        }
+
+        $stop->forceFill([
+            'status' => CommandStatus::FAILED,
+            'completed_at' => now(),
+            'error_message' => 'Device never received the stop command.',
+        ])->save();
+
+        $recording->forceFill([
+            'status' => RecordingStatus::FAILED,
+            'error_message' => 'Device never received the stop command; stopped from the dashboard.',
+        ])->save();
+
+        RecordingFailed::dispatch($recording->fresh());
+
+        $device = $recording->device;
+        if ($device && $device->status === DeviceStatus::RECORDING) {
+            $device->forceFill(['status' => DeviceStatus::ONLINE])->save();
+            DeviceStatusChanged::dispatch($device);
+        }
     }
 }

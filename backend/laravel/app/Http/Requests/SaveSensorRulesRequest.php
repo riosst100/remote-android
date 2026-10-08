@@ -31,8 +31,6 @@ class SaveSensorRulesRequest extends FormRequest
             'rules.*.popup' => ['nullable', 'array'],
             'rules.*.popup.title' => ['nullable', 'string', 'max:120'],
             'rules.*.popup.message' => ['nullable', 'string', 'max:1000'],
-            'rules.*.popup.volume' => ['nullable', 'integer', 'between:0,100'],
-            'rules.*.popup.brightness' => ['nullable', 'integer', 'between:0,100'],
         ];
     }
 

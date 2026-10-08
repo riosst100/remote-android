@@ -32,8 +32,19 @@ class VideoSessionManager(
     @Volatile private var state: State = State.IDLE
     private var activeRecordingId: String? = null
     private var recorder: VideoRecorder? = null
+    private var lastStoppedRecordingId: String? = null
 
     fun isRecording(): Boolean = state == State.RECORDING
+
+    /**
+     * Routes a flash toggle through the live video session so the torch can
+     * be used as illumination while filming. Returns false when no capture
+     * is active, so the caller falls back to the standalone torch path.
+     */
+    fun trySetTorch(enabled: Boolean): Boolean {
+        if (state != State.RECORDING) return false
+        return recorder?.setTorch(enabled) ?: false
+    }
 
     @Synchronized
     fun handleCommand(command: Command) {
@@ -86,11 +97,19 @@ class VideoSessionManager(
 
         if (state != State.RECORDING) {
             AgentLog.w("video", "STOP_VIDEO while $state; nothing to stop.")
+            // The capture is already gone (crash, service restart, camera
+            // error), so tell the server instead of leaving the recording
+            // stuck in STOPPING. A duplicate STOP for a session we already
+            // stopped (it may still be uploading) is left alone.
+            if (command.recordingId != lastStoppedRecordingId) {
+                acknowledge(command.commandId, "recording_error", errorCode = "SERVICE_ERROR", errorMessage = "Device was not recording video.")
+            }
             return
         }
 
         state = State.STOPPING
         val recordingId = activeRecordingId
+        lastStoppedRecordingId = recordingId
         val activeRecorder = recorder
 
         val file = runCatching { activeRecorder?.stop() }.getOrNull()

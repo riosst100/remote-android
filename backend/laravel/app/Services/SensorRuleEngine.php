@@ -123,12 +123,15 @@ class SensorRuleEngine
                         return false;
                     }
                     $popup = $rule['popup'] ?? [];
+                    // Volume and brightness follow the dashboard's Alert
+                    // Popup settings, so one slider controls every popup.
+                    $defaults = $device->alert_defaults ?? [];
                     $this->alerts->sendAlert(
                         $device,
                         (string) ($popup['title'] ?? 'Attention'),
                         (string) ($popup['message'] ?? ''),
-                        (int) ($popup['volume'] ?? 100),
-                        (int) ($popup['brightness'] ?? 100),
+                        (int) ($defaults['volume'] ?? 100),
+                        (int) ($defaults['brightness'] ?? 100),
                         rememberDefaults: false,
                     );
 

@@ -50,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/devices/{device}/flash', [DeviceFlashController::class, 'store']);
     Route::post('/devices/{device}/alert', [DeviceAlertController::class, 'store']);
     Route::post('/devices/{device}/alert/dismiss', [DeviceAlertController::class, 'dismiss']);
+    Route::post('/devices/{device}/alert/defaults', [DeviceAlertController::class, 'saveDefaults']);
     Route::post('/devices/{device}/sensor-rules', [DeviceSensorRulesController::class, 'store']);
 
     Route::post('/recordings/start', [RecordingController::class, 'start']);

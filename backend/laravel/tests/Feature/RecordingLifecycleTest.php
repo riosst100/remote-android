@@ -143,6 +143,46 @@ class RecordingLifecycleTest extends TestCase
         $this->assertSame(1, DeviceCommand::query()->where('command', 'STOP_RECORDING')->count());
     }
 
+    public function test_stopping_again_fails_a_video_whose_stop_the_device_never_received(): void
+    {
+        $this->actingAsAdmin();
+        $device = Device::factory()->create(['status' => DeviceStatus::ONLINE]);
+
+        $recordingUuid = $this->postJson('/api/recordings/video/start', ['device_id' => $device->id])->json('data.uuid');
+        $this->postJson("/api/recordings/{$recordingUuid}/video/stop")->assertOk();
+
+        // Within the grace period a repeat Stop is still a no-op.
+        $this->assertSame('STOPPING', $this->postJson("/api/recordings/{$recordingUuid}/video/stop")->json('data.status'));
+
+        $this->travel(2)->minutes();
+
+        $this->postJson("/api/recordings/{$recordingUuid}/video/stop")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'FAILED');
+        $this->assertSame(CommandStatus::FAILED, DeviceCommand::query()->where('command', 'STOP_VIDEO')->first()->status);
+        $this->assertSame(1, DeviceCommand::query()->where('command', 'STOP_VIDEO')->count());
+    }
+
+    public function test_stopping_again_leaves_a_stop_the_device_received_alone(): void
+    {
+        $this->actingAsAdmin();
+        $device = Device::factory()->create(['status' => DeviceStatus::ONLINE]);
+        $token = $device->createToken('test')->plainTextToken;
+
+        $recordingUuid = $this->postJson('/api/recordings/video/start', ['device_id' => $device->id])->json('data.uuid');
+        $this->postJson("/api/recordings/{$recordingUuid}/video/stop");
+        $stopCommandId = DeviceCommand::query()->where('command', 'STOP_VIDEO')->first()->command_id;
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson("/api/commands/{$stopCommandId}/ack", ['event' => 'command_received'])
+            ->assertOk();
+
+        $this->travel(2)->minutes();
+
+        $this->postJson("/api/recordings/{$recordingUuid}/video/stop")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'STOPPING');
+    }
+
     public function test_recording_endpoints_require_admin_authentication(): void
     {
         $device = Device::factory()->create();

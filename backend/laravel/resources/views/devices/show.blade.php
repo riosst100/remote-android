@@ -214,7 +214,7 @@
         <div>
             <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Volume: <span id="alert-volume-value">{{ $defVolume }}</span>%</label>
             <input type="range" id="alert-volume" min="0" max="100" value="{{ $defVolume }}" step="5" style="width:100%;max-width:320px;">
-            <p class="muted" style="font-size:12px;margin:4px 0 0;">The device raises its alarm volume to this level while the alert sounds, then restores it on dismiss.</p>
+            <p class="muted" style="font-size:12px;margin:4px 0 0;">The device raises its alarm volume to this level while the alert sounds, then restores it on dismiss. Also used by sensor-rule popups; saved as soon as you release the slider.</p>
         </div>
         <div>
             <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Brightness: <span id="alert-brightness-value">{{ $defBrightness }}</span>%</label>
@@ -465,8 +465,6 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
             rule.popup = {
                 title: row.querySelector('.rule-popup-title').value.trim(),
                 message: row.querySelector('.rule-popup-message').value.trim(),
-                volume: 100,
-                brightness: 100,
             };
         }
         return rule;
@@ -502,6 +500,22 @@ const alertBrightness = document.getElementById('alert-brightness');
 alertBrightness.addEventListener('input', () => {
     document.getElementById('alert-brightness-value').textContent = alertBrightness.value;
 });
+
+/* Save the sliders as soon as they're released, so sensor-rule popups pick
+   up the new volume/brightness without the admin sending a manual alert. */
+async function saveAlertLevels() {
+    try {
+        await window.apiFetch(`/api/devices/{{ $device->id }}/alert/defaults`, {
+            method: 'POST',
+            body: JSON.stringify({ volume: parseInt(alertVolume.value, 10), brightness: parseInt(alertBrightness.value, 10) }),
+        });
+        window.showToast('Alert volume & brightness saved.');
+    } catch (err) {
+        window.showToast(err.message, true);
+    }
+}
+alertVolume.addEventListener('change', saveAlertLevels);
+alertBrightness.addEventListener('change', saveAlertLevels);
 
 document.getElementById('alert-btn').addEventListener('click', async (e) => {
     const title = document.getElementById('alert-title').value.trim();

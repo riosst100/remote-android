@@ -18,6 +18,11 @@ return [
     // a recording stuck forever with no retry path.
     'stuck_recording_timeout_seconds' => env('RECORDER_STUCK_RECORDING_TIMEOUT', 1800),
 
+    // Seconds after which pressing Stop again on a STOPPING recording whose
+    // stop command the device never received fails it immediately, instead
+    // of waiting for the stuck-recording sweep above.
+    'unreceived_stop_grace_seconds' => env('RECORDER_UNRECEIVED_STOP_GRACE', 60),
+
     // Path to the ffmpeg binary, used to concatenate video (mp4) recording
     // parts into one file (audio parts are byte-concatenated without it).
     // Defaults to "ffmpeg" on PATH; override in .env where it lives elsewhere

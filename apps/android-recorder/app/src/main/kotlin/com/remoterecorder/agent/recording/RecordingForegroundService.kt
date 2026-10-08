@@ -250,7 +250,15 @@ class RecordingForegroundService : Service() {
      */
     private fun handleFlashCommand(command: Command, on: Boolean) {
         serviceScope.launch {
-            val result = runCatching { torchController.setEnabled(on) }
+            // While video is recording the camera is held by the capture
+            // session, so a standalone setTorchMode call is rejected as
+            // CAMERA_IN_USE. Drive the torch through that session instead;
+            // fall back to the standalone controller when nothing is filming.
+            val result = if (videoSessionManager.trySetTorch(on)) {
+                Result.success(Unit)
+            } else {
+                runCatching { torchController.setEnabled(on) }
+            }
             if (result.isSuccess) {
                 ActuatorState.setFlashOn(on)
                 sensorMonitor.reportNow()
