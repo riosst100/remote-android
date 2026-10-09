@@ -217,6 +217,12 @@
     @php $activeVideo = $device->recordings->first(fn($r) => !$r->status->isTerminal() && ($r->media_kind?->value ?? 'AUDIO') === 'VIDEO'); @endphp
     <button id="video-start-btn" class="primary" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start Video</button>
     <button id="video-stop-btn" class="danger" data-recording="{{ $activeVideo->uuid ?? '' }}" {{ $activeVideo ? '' : 'disabled' }}>Stop Video</button>
+    <div style="margin-top:12px;">
+        <label style="font-size:12px;color:var(--muted);">Max duration (minutes, 0 = no limit)
+            <input type="number" id="video-max-minutes" min="0" max="1440" step="1" value="{{ $device->max_video_minutes ?? 0 }}" style="display:block;margin-top:2px;width:120px;">
+        </label>
+        <p class="muted" style="font-size:12px;margin:4px 0 0;">A video recording stops automatically after this many minutes (manual or rule-triggered). Saved as soon as you change it.</p>
+    </div>
 </div>
 
 <div class="card" style="margin-bottom:24px;">
@@ -422,6 +428,20 @@ document.getElementById('video-stop-btn').addEventListener('click', async (e) =>
     } catch (err) {
         window.showToast(err.message, true);
         e.target.disabled = false;
+    }
+});
+
+/* Save the max video duration as soon as it's changed. */
+document.getElementById('video-max-minutes').addEventListener('change', async (e) => {
+    const minutes = parseInt(e.target.value, 10);
+    try {
+        await window.apiFetch(`/api/devices/{{ $device->id }}/video/settings`, {
+            method: 'POST',
+            body: JSON.stringify({ max_video_minutes: Number.isFinite(minutes) ? minutes : 0 }),
+        });
+        window.showToast(minutes > 0 ? `Video auto-stops after ${minutes} min.` : 'Video duration limit removed.');
+    } catch (err) {
+        window.showToast(err.message, true);
     }
 });
 

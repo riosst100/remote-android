@@ -15,6 +15,7 @@ use App\Events\RecordingStartRequested;
 use App\Events\RecordingStopped;
 use App\Events\RecordingStopRequested;
 use App\Exceptions\DeviceUnavailableException;
+use App\Jobs\StopVideoRecording;
 use App\Models\Device;
 use App\Models\DeviceCommand;
 use App\Models\Recording;
@@ -134,7 +135,7 @@ class RecordingLifecycleService
      */
     public function startVideo(Device $device): Recording
     {
-        return DB::transaction(function () use ($device) {
+        $recording = DB::transaction(function () use ($device) {
             $device = Device::query()->lockForUpdate()->findOrFail($device->id);
 
             $active = $device->recordings()
@@ -178,6 +179,18 @@ class RecordingLifecycleService
 
             return $recording;
         });
+
+        // Arm the auto-stop only for a freshly-started recording (not the
+        // idempotent return of an already-active one), when the device has a
+        // maximum video duration configured.
+        if ($recording->wasRecentlyCreated) {
+            $maxMinutes = (int) (Device::query()->whereKey($device->id)->value('max_video_minutes') ?? 0);
+            if ($maxMinutes > 0) {
+                StopVideoRecording::dispatch($recording->id)->delay(now()->addMinutes($maxMinutes));
+            }
+        }
+
+        return $recording;
     }
 
     /**

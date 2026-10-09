@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\DeviceRecordingController;
 use App\Http\Controllers\Api\DeviceScheduleController;
 use App\Http\Controllers\Api\DeviceSensorsController;
 use App\Http\Controllers\Api\DeviceSensorRulesController;
+use App\Http\Controllers\Api\DeviceVideoSettingsController;
 use App\Http\Controllers\Api\RecordingChunkController;
 use App\Http\Controllers\Api\RecordingCompletionController;
 use App\Http\Controllers\Api\RecordingController;
@@ -57,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/recordings/{recording:uuid}/stop', [RecordingController::class, 'stop']);
     Route::post('/recordings/video/start', [RecordingController::class, 'startVideo']);
     Route::post('/recordings/{recording:uuid}/video/stop', [RecordingController::class, 'stopVideo']);
+    Route::post('/devices/{device}/video/settings', [DeviceVideoSettingsController::class, 'update']);
     Route::get('/recordings', [RecordingController::class, 'index']);
     Route::get('/recordings/{recording:uuid}', [RecordingController::class, 'show']);
 });

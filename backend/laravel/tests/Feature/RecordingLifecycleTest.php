@@ -5,10 +5,13 @@ namespace Tests\Feature;
 use App\Enums\CommandStatus;
 use App\Enums\DeviceStatus;
 use App\Enums\RecordingStatus;
+use App\Jobs\StopVideoRecording;
 use App\Models\Device;
 use App\Models\DeviceCommand;
 use App\Models\User;
+use App\Services\RecordingLifecycleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class RecordingLifecycleTest extends TestCase
@@ -181,6 +184,51 @@ class RecordingLifecycleTest extends TestCase
         $this->postJson("/api/recordings/{$recordingUuid}/video/stop")
             ->assertOk()
             ->assertJsonPath('data.status', 'STOPPING');
+    }
+
+    public function test_video_auto_stop_is_scheduled_when_a_max_duration_is_set(): void
+    {
+        Queue::fake();
+        $device = Device::factory()->create(['status' => DeviceStatus::ONLINE, 'max_video_minutes' => 5]);
+
+        $recording = app(RecordingLifecycleService::class)->startVideo($device);
+
+        Queue::assertPushed(StopVideoRecording::class, fn ($job) => $job->recordingId === $recording->id);
+    }
+
+    public function test_video_auto_stop_is_not_scheduled_without_a_max_duration(): void
+    {
+        Queue::fake();
+        $device = Device::factory()->create(['status' => DeviceStatus::ONLINE]);
+
+        app(RecordingLifecycleService::class)->startVideo($device);
+
+        Queue::assertNotPushed(StopVideoRecording::class);
+    }
+
+    public function test_auto_stop_job_stops_an_active_video(): void
+    {
+        $device = Device::factory()->create(['status' => DeviceStatus::ONLINE]); // no max -> no auto-dispatch
+        $recording = app(RecordingLifecycleService::class)->startVideo($device);
+
+        (new StopVideoRecording($recording->id))->handle(app(RecordingLifecycleService::class));
+
+        $this->assertSame(RecordingStatus::STOPPING, $recording->fresh()->status);
+        $this->assertDatabaseHas('device_commands', ['recording_id' => $recording->id, 'command' => 'STOP_VIDEO']);
+    }
+
+    public function test_admin_can_save_the_max_video_duration(): void
+    {
+        $this->actingAsAdmin();
+        $device = Device::factory()->create();
+
+        $this->postJson("/api/devices/{$device->id}/video/settings", ['max_video_minutes' => 10])->assertOk();
+        $this->assertSame(10, $device->fresh()->max_video_minutes);
+
+        $this->postJson("/api/devices/{$device->id}/video/settings", ['max_video_minutes' => 0])->assertOk();
+        $this->assertNull($device->fresh()->max_video_minutes);
+
+        $this->postJson("/api/devices/{$device->id}/video/settings", ['max_video_minutes' => 99999])->assertStatus(422);
     }
 
     public function test_recording_endpoints_require_admin_authentication(): void
