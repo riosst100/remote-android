@@ -3,11 +3,16 @@
 @section('title', 'Devices')
 
 @section('content')
-<h2 style="margin-top:0;">Devices <span id="realtime-indicator" class="muted" style="font-size:12px;font-weight:400;"></span></h2>
-<div class="card">
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:32px;">
+    <div>
+        <h1 style="margin-bottom:8px;">Device Fleet</h1>
+        <p class="muted" style="margin:0;">Monitor connections and control recordings remotely. <span id="realtime-indicator" role="status" aria-live="polite"></span></p>
+    </div>
+</div>
+<div class="card" style="padding:0;">
     <table>
         <thead>
-            <tr><th>Device</th><th>Model</th><th>Android</th><th>Status</th><th>Last Seen</th><th>Current Recording</th><th>Duration</th><th>Actions</th></tr>
+            <tr><th>Device Info</th><th>Android</th><th>Status</th><th>Last Seen</th><th>Active Session</th><th style="text-align:right;">Quick Actions</th></tr>
         </thead>
         <tbody id="devices-table-body">
             @forelse ($devices as $device)
@@ -20,48 +25,48 @@
                 data-recording-uuid="{{ $active->uuid ?? '' }}"
                 data-started-at="{{ $isLive ? $active->started_at->toIso8601String() : '' }}"
                 data-last-duration="{{ (!$active && $lastRecording?->duration) ? $lastRecording->duration : '' }}">
-                <td><a href="{{ route('devices.show', $device) }}">{{ $device->name ?? $device->device_uuid }}</a></td>
-                <td>{{ $device->manufacturer }} {{ $device->model }}</td>
-                <td>{{ $device->android_version }}</td>
+                <td>
+                    <div style="display:flex;flex-direction:column;">
+                        <a href="{{ route('devices.show', $device) }}" style="font-weight:700;font-size:15px;margin-bottom:2px;">{{ $device->name ?? $device->device_uuid }}</a>
+                        <span class="muted" style="font-size:12px;">{{ $device->manufacturer }} {{ $device->model }}</span>
+                    </div>
+                </td>
+                <td><span class="badge" style="background:rgba(255,255,255,0.05);">{{ $device->android_version }}</span></td>
                 <td class="device-status"><span class="badge {{ $device->status->value }}">{{ $device->status->value }}</span></td>
-                <td class="device-last-seen muted">{{ optional($device->last_seen_at)->diffForHumans() ?? 'never' }}</td>
+                <td class="device-last-seen muted" style="font-size:13px;">{{ optional($device->last_seen_at)->diffForHumans() ?? 'never' }}</td>
                 <td class="device-recording">
                     @if ($active)
-                        <a href="{{ route('recordings.show', $active) }}">{{ substr($active->uuid, 0, 8) }} ({{ $active->status->value }})</a>
+                        <div style="display:flex;flex-direction:column;gap:2px;">
+                            <a href="{{ route('recordings.show', $active) }}" style="font-size:13px;font-weight:600;"><code>{{ substr($active->uuid, 0, 8) }}</code></a>
+                            <span class="device-duration muted" style="font-size:11px;font-weight:700;font-family:monospace;">
+                                @if ($isLive)
+                                    <span class="live-timer" style="color:var(--ok);">00:00:00</span>
+                                @else
+                                    {{ $active->status->value }}
+                                @endif
+                            </span>
+                        </div>
                     @else
-                        <span class="muted">—</span>
+                        <span class="muted" style="font-size:12px;">Idle</span>
                     @endif
                 </td>
-                <td class="device-duration muted">
-                    @if ($isLive)
-                        <span class="live-timer">00:00:00</span>
-                    @elseif ($lastRecording?->duration)
-                        {{ gmdate('H:i:s', $lastRecording->duration) }}
-                    @else
-                        —
-                    @endif
-                </td>
-                <td>
-                    <select class="preset-select" data-device="{{ $device->id }}" {{ $active ? 'disabled' : '' }} style="max-width:220px;">
-                        @foreach ($presets as $preset)
-                            @php $config = $presetConfigsByDevice[$device->id][$preset->value]; @endphp
-                            <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>
-                                {{ $preset->value }} — {{ strtoupper($config['encoder']) }} {{ number_format($config['sample_rate'] / 1000, 1) }}kHz/{{ $config['bitrate'] / 1000 }}kbps
-                            </option>
-                        @endforeach
-                    </select>
-                    <button class="primary start-btn" data-device="{{ $device->id }}" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start</button>
-                    <button class="danger stop-btn" data-recording="{{ $active->uuid ?? '' }}" {{ $active ? '' : 'disabled' }}>Stop</button>
-                    <form method="POST" action="{{ route('devices.destroy', $device) }}" style="display:inline;"
-                          onsubmit="return confirm('Delete this device and ALL of its recordings? This cannot be undone.');">
-                        @csrf
-                        @method('DELETE')
-                        <button type="submit" class="danger" {{ $active ? 'disabled title="Stop the active recording first."' : '' }}>Delete</button>
-                    </form>
+                <td style="text-align:right;">
+                    <div style="display:inline-flex;align-items:center;gap:8px;">
+                        <select class="preset-select" data-device="{{ $device->id }}" {{ $active ? 'disabled' : '' }} style="width:100px;padding:6px 10px;font-size:12px;">
+                            @foreach ($presets as $preset)
+                                <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>{{ $preset->value }}</option>
+                            @endforeach
+                        </select>
+                        <button class="primary start-btn btn-sm" data-device="{{ $device->id }}" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }} style="padding:6px 14px;font-size:12px;">Record</button>
+                        <button class="danger stop-btn btn-sm" data-recording="{{ $active->uuid ?? '' }}" {{ $active ? '' : 'disabled' }} style="padding:6px 14px;font-size:12px;">Stop</button>
+                        <a href="{{ route('devices.show', $device) }}" class="btn btn-sm" style="padding:6px 10px;" title="Details">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+                        </a>
+                    </div>
                 </td>
             </tr>
             @empty
-            <tr><td colspan="8" class="muted">No devices have registered yet.</td></tr>
+            <tr><td colspan="6" class="muted" style="text-align:center;padding:64px 0;">No devices have registered yet. <br><a href="{{ route('apk.download') }}" class="btn primary" style="margin-top:16px;">Download Agent APK</a></td></tr>
             @endforelse
         </tbody>
     </table>

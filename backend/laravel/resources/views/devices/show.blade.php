@@ -3,381 +3,457 @@
 @section('title', $device->name ?? $device->device_uuid)
 
 @section('content')
-<p><a href="{{ route('devices.index') }}">&larr; Devices</a></p>
-<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-    <h2 style="margin-top:0;">{{ $device->name ?? 'Unnamed device' }}</h2>
-    <form method="POST" action="{{ route('devices.destroy', $device) }}"
-          onsubmit="return confirm('Delete this device and ALL of its recordings? This cannot be undone.');">
+<div style="margin-bottom:24px;">
+    <a href="{{ route('devices.index') }}" class="muted" style="font-size:13px;display:flex;align-items:center;gap:6px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Back to Fleet
+    </a>
+</div>
+
+<div style="display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:32px;">
+    <div style="display:flex;align-items:center;gap:16px;">
+        <div style="width:48px;height:48px;background:var(--panel-2);border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--accent);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+        </div>
+        <div>
+            <h1 style="font-size:28px;">{{ $device->name ?? 'Unnamed Device' }}</h1>
+            <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                <span class="badge {{ $device->status->value }}">{{ $device->status->value }}</span>
+                <span class="muted" style="font-size:13px;">Last seen {{ optional($device->last_seen_at)->diffForHumans() ?? 'never' }}</span>
+            </div>
+        </div>
+    </div>
+    <form method="POST" action="{{ route('devices.destroy', $device) }}" onsubmit="return confirm('Delete this device and ALL of its recordings? This cannot be undone.');">
         @csrf
         @method('DELETE')
         <button type="submit" class="danger">Delete Device</button>
     </form>
 </div>
 
-<div class="grid cols-2" style="margin-bottom:24px;">
-    <div class="card">
-        <h3 style="margin-top:0;">Device Information</h3>
-        <table>
-            <tr><th>UUID</th><td><code>{{ $device->device_uuid }}</code></td></tr>
-            <tr><th>Manufacturer</th><td>{{ $device->manufacturer ?? '—' }}</td></tr>
-            <tr><th>Model</th><td>{{ $device->model ?? '—' }}</td></tr>
-            <tr><th>Android Version</th><td>{{ $device->android_version ?? '—' }}</td></tr>
-            <tr><th>App Version</th><td>{{ $device->app_version ?? '—' }}</td></tr>
-            <tr><th>Status</th><td><span class="badge {{ $device->status->value }}">{{ $device->status->value }}</span></td></tr>
-            <tr><th>Last Heartbeat</th><td>{{ optional($device->last_seen_at)->diffForHumans() ?? 'never' }}</td></tr>
-        </table>
+{{-- Tabs Navigation --}}
+<div style="display:flex;gap:32px;border-bottom:1px solid var(--border);margin-bottom:32px;">
+    <button class="tab-link active" onclick="openTab(event, 'tab-monitor')">Monitor</button>
+    <button class="tab-link" onclick="openTab(event, 'tab-control')">Remote Control</button>
+    <button class="tab-link" onclick="openTab(event, 'tab-automation')">Automation</button>
+    <button class="tab-link" onclick="openTab(event, 'tab-history')">History</button>
+</div>
+
+<style>
+    .tab-link { 
+        background: none; border: none; padding: 0 0 12px 0; color: var(--muted); font-weight: 600; 
+        font-size: 15px; border-bottom: 2px solid transparent; border-radius: 0; cursor: pointer;
+    }
+    .tab-link:hover { color: var(--text); }
+    .tab-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-content { display: none; animation: fadeIn 0.3s ease-out; }
+    .tab-content.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .sensor-card { 
+        background: linear-gradient(135deg, var(--panel), rgba(255,255,255,0.02)); 
+        border: 1px solid var(--border); border-radius: 16px; padding: 20px;
+    }
+    .sensor-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 12px; }
+    .sensor-val { font-size: 32px; font-weight: 800; color: var(--text); font-family: 'JetBrains Mono', monospace; }
+</style>
+
+<div id="tab-monitor" class="tab-content active">
+    <div style="text-align:right;margin-bottom:8px;"><span id="sensors-updated" class="muted" style="font-size:12px;">waiting for device…</span></div>
+    <div class="grid cols-3" style="margin-bottom:24px;">
+        <div class="sensor-card">
+            <div class="sensor-label">Light Level</div>
+            <div class="sensor-val" id="sensor-lux">—</div>
+            <div class="muted" id="sensor-lux-note" style="font-size:12px;margin-top:4px;">lux</div>
+        </div>
+        <div class="sensor-card">
+            <div class="sensor-label">Motion State</div>
+            <div class="sensor-val" id="sensor-motion">—</div>
+            <div class="muted" id="sensor-motion-note" style="font-size:12px;margin-top:4px;">accelerometer</div>
+        </div>
+        <div class="sensor-card">
+            <div class="sensor-label">Proximity</div>
+            <div class="sensor-val" id="sensor-proximity">—</div>
+            <div class="muted" id="sensor-proximity-note" style="font-size:12px;margin-top:4px;">cover sensor</div>
+        </div>
     </div>
-    <div class="card">
-        <h3 style="margin-top:0;">Audio Capabilities</h3>
-        @if ($device->capabilities)
-        <table>
-            <tr><th>Encoders</th><td>{{ implode(', ', $device->capabilities['encoders'] ?? []) }}</td></tr>
-            <tr><th>Sample Rates</th><td>{{ implode(', ', $device->capabilities['sample_rates'] ?? []) }}</td></tr>
-            <tr><th>Channels</th><td>{{ implode(', ', $device->capabilities['channels'] ?? []) }}</td></tr>
-            <tr><th>Bitrates</th><td>{{ implode(', ', $device->capabilities['bitrates'] ?? []) }}</td></tr>
-        </table>
-        @else
-        <p class="muted">No capability data reported yet.</p>
-        @endif
+
+    <div class="grid cols-2" style="margin-bottom:32px;">
+        <div class="card">
+            <h3 style="margin-bottom:20px;">Device Information</h3>
+            <table class="muted" style="font-size:13px;">
+                <tr><th style="width:140px;">UUID</th><td><code>{{ $device->device_uuid }}</code></td></tr>
+                <tr><th>Manufacturer</th><td style="color:var(--text);font-weight:600;">{{ $device->manufacturer ?? '—' }}</td></tr>
+                <tr><th>Model</th><td style="color:var(--text);font-weight:600;">{{ $device->model ?? '—' }}</td></tr>
+                <tr><th>Android Version</th><td><span class="badge">{{ $device->android_version ?? '—' }}</span></td></tr>
+                <tr><th>App Version</th><td>{{ $device->app_version ?? '—' }}</td></tr>
+                <tr><th>Status</th><td><span class="badge {{ $device->status->value }}">{{ $device->status->value }}</span></td></tr>
+                <tr><th>Last Heartbeat</th><td>{{ optional($device->last_seen_at)->toDayDateTimeString() }}</td></tr>
+            </table>
+        </div>
+        <div class="card">
+            <h3 style="margin-bottom:20px;">Hardware Capabilities</h3>
+            @if ($device->capabilities)
+            <table class="muted" style="font-size:13px;">
+                <tr><th style="width:140px;">Encoders</th><td style="color:var(--text);">{{ implode(', ', $device->capabilities['encoders'] ?? []) }}</td></tr>
+                <tr><th>Sample Rates</th><td style="color:var(--text);">{{ implode(', ', $device->capabilities['sample_rates'] ?? []) }}</td></tr>
+                <tr><th>Channels</th><td style="color:var(--text);">{{ implode(', ', $device->capabilities['channels'] ?? []) }}</td></tr>
+                <tr><th>Bitrates</th><td style="color:var(--text);">{{ implode(', ', (array) ($device->capabilities['bitrates'] ?? [])) }}</td></tr>
+            </table>
+            @else
+            <div style="text-align:center;padding:32px 0;">
+                <p class="muted">No hardware capability data reported yet.</p>
+            </div>
+            @endif
+        </div>
     </div>
 </div>
 
-<div class="card" style="margin-bottom:24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-        <h3 style="margin:0;">Live Sensors</h3>
-        <span id="sensors-updated" class="muted" style="font-size:12px;">waiting for device…</span>
-    </div>
-    <p class="muted" style="margin-top:4px;">Streamed in real time while the device is running. Values are not stored — they appear as the device reports them.</p>
-    <div class="grid cols-3" style="margin-top:12px;">
-        <div class="card" style="background:rgba(255,255,255,.02);">
-            <div class="stat-label">Light</div>
-            <div class="stat" id="sensor-lux" style="font-size:28px;">—</div>
-            <div class="muted" id="sensor-lux-note" style="font-size:12px;">lux</div>
-        </div>
-        <div class="card" style="background:rgba(255,255,255,.02);">
-            <div class="stat-label">Motion</div>
-            <div class="stat" id="sensor-motion" style="font-size:28px;">—</div>
-            <div class="muted" id="sensor-motion-note" style="font-size:12px;">accelerometer</div>
-        </div>
-        <div class="card" style="background:rgba(255,255,255,.02);">
-            <div class="stat-label">Proximity</div>
-            <div class="stat" id="sensor-proximity" style="font-size:28px;">—</div>
-            <div class="muted" id="sensor-proximity-note" style="font-size:12px;">cover sensor</div>
-        </div>
-    </div>
-
-    <h4 style="margin:20px 0 8px;">Actuators</h4>
-    <div class="grid cols-2" style="margin-top:4px;">
-        <div class="card" style="background:rgba(255,255,255,.02);">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                <div>
-                    <div class="stat-label">Popup</div>
-                    <div class="stat" id="actuator-popup" style="font-size:24px;color:var(--muted);">Unknown</div>
-                </div>
-                <button id="dismiss-popup-btn" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Close Popup</button>
-            </div>
-        </div>
-        <div class="card" style="background:rgba(255,255,255,.02);">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                <div>
-                    <div class="stat-label">Flash</div>
-                    <div class="stat" id="actuator-flash" style="font-size:24px;color:var(--muted);">Unknown</div>
-                </div>
-                <button id="flash-off-inline-btn" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Off</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-        <h3 style="margin:0;">Sensor Automation</h3>
-        <span id="rules-status" class="muted" style="font-size:12px;"></span>
-    </div>
-    <p class="muted" style="margin-top:4px;">Rules the server checks against every live sensor reading from the device. All conditions in a rule must hold (AND); leave a condition blank to ignore it. The action fires once each time the conditions become true, so the manual Flash/Alert controls keep working: a rule won't undo a manual change until its conditions clear and hold again.</p>
-
-    <div id="rules-list" style="margin-top:12px;"></div>
-
-    <div style="display:flex;gap:8px;margin-top:12px;">
-        <button id="add-rule-btn">+ Add Rule</button>
-        <button id="save-rules-btn" class="primary">Save Rules</button>
-    </div>
-
-    {{-- Template for one rule row, cloned by JS. --}}
-    <template id="rule-template">
-        <div class="card rule-row" style="background:rgba(255,255,255,.02);margin-bottom:10px;">
-            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
-                <label style="font-size:12px;color:var(--muted);">Action
-                    <select class="rule-action" style="display:block;margin-top:2px;">
-                        <option value="POPUP">Show Popup</option>
-                        <option value="FLASH_ON">Flash On</option>
-                        <option value="FLASH_OFF">Flash Off</option>
-                        <option value="VIDEO_START">Start Video Recording</option>
-                        <option value="VIDEO_STOP">Stop Video Recording</option>
-                    </select>
-                </label>
-                <label style="font-size:12px;color:var(--muted);">Motion
-                    <select class="rule-motion" style="display:block;margin-top:2px;">
-                        <option value="">(any)</option>
-                        <option value="PICKED_UP">Picked up</option>
-                        <option value="PUT_DOWN">Put down</option>
-                        <option value="STILL">Still</option>
-                        <option value="MOVING">Moving</option>
-                    </select>
-                </label>
-                <label style="font-size:12px;color:var(--muted);">Light (lux)
-                    <span style="display:flex;gap:4px;margin-top:2px;">
-                        <select class="rule-lux-op">
-                            <option value="">(ignore)</option>
-                            <option value="lt">&lt;</option>
-                            <option value="gt">&gt;</option>
-                        </select>
-                        <input type="number" class="rule-lux-value" min="0" step="1" placeholder="value" style="width:90px;">
-                    </span>
-                </label>
-                <label style="font-size:12px;color:var(--muted);">Proximity
-                    <select class="rule-proximity" style="display:block;margin-top:2px;">
-                        <option value="">(any)</option>
-                        <option value="near">Near (covered)</option>
-                        <option value="far">Far (uncovered)</option>
-                    </select>
-                </label>
-                <label style="font-size:12px;color:var(--muted);">Sustained for
-                    <span style="display:flex;gap:4px;align-items:center;margin-top:2px;">
-                        <input type="number" class="rule-for-seconds" min="0" max="3600" step="1" placeholder="0" style="width:70px;"> s
-                    </span>
-                </label>
-                <button class="rule-remove danger" type="button" style="margin-left:auto;">Remove</button>
-            </div>
-            <div class="rule-popup-fields" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;">
-                <input type="text" class="rule-popup-title" placeholder="Popup title" maxlength="120" style="flex:1;min-width:160px;">
-                <input type="text" class="rule-popup-message" placeholder="Popup message" maxlength="1000" style="flex:2;min-width:200px;">
-            </div>
-            <div class="rule-videoflash-fields" style="margin-top:10px;">
-                <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;color:var(--text);">
-                    <input type="checkbox" class="rule-with-flash"> Turn the flash on too once recording starts
-                </label>
-            </div>
-            <div class="rule-schedule-fields" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;">
-                <label style="font-size:12px;color:var(--muted);">Active days
-                    <span style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;">
-                        @foreach (['Sun' => 0, 'Mon' => 1, 'Tue' => 2, 'Wed' => 3, 'Thu' => 4, 'Fri' => 5, 'Sat' => 6] as $lbl => $d)
-                        <label style="font-size:12px;display:inline-flex;align-items:center;gap:3px;color:var(--text);">
-                            <input type="checkbox" class="rule-day" value="{{ $d }}"> {{ $lbl }}
-                        </label>
+<div id="tab-control" class="tab-content">
+    <div class="grid cols-2" style="margin-bottom:32px;">
+        <div class="card">
+            <h3 style="margin-bottom:8px;">Audio Recording</h3>
+            <p class="muted" style="margin-bottom:20px;font-size:13px;">Configure and trigger high-quality audio capture.</p>
+            
+            @php $active = $device->recordings->first(fn($r) => !$r->status->isTerminal()); @endphp
+            <div style="display:flex;flex-direction:column;gap:16px;">
+                <div style="display:flex;gap:12px;">
+                    <select id="preset-select" {{ $active ? 'disabled' : '' }} style="flex:1;">
+                        @foreach ($presets as $preset)
+                            <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>{{ $preset->value }}</option>
                         @endforeach
-                    </span>
-                </label>
-                <label style="font-size:12px;color:var(--muted);">From
-                    <input type="time" class="rule-time-from" style="display:block;margin-top:2px;">
-                </label>
-                <label style="font-size:12px;color:var(--muted);">To
-                    <input type="time" class="rule-time-to" style="display:block;margin-top:2px;">
-                </label>
-            </div>
-            <p class="muted" style="font-size:11px;margin:6px 0 0;">Leave days unchecked and times blank to apply at all times. Both times must be set together; times are {{ config('recorder.rule_timezone', config('app.timezone')) }} and a From later than To means an overnight window.</p>
-        </div>
-    </template>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <h3 style="margin-top:0;">Start a Recording</h3>
-    <p class="muted">Expected configuration per preset, resolved against this device's reported capabilities. The device performs its own final fallback if the proposed configuration turns out to be unsupported.</p>
-    <table style="margin-bottom:16px;">
-        <thead><tr><th>Preset</th><th>Encoder</th><th>Sample Rate</th><th>Bitrate</th><th>Channels</th></tr></thead>
-        <tbody>
-        @foreach ($previewConfigs as $preset => $config)
-            <tr>
-                <td>{{ $preset }}</td>
-                <td>{{ $config['encoder'] }}</td>
-                <td>{{ $config['sample_rate'] }} Hz</td>
-                <td>{{ $config['bitrate'] ? number_format($config['bitrate'] / 1000).' kbps' : 'lossless' }}</td>
-                <td>{{ $config['channels'] }}</td>
-            </tr>
-        @endforeach
-        </tbody>
-    </table>
-
-    @php $active = $device->recordings->first(fn($r) => !$r->status->isTerminal()); @endphp
-    <select id="preset-select" {{ $active ? 'disabled' : '' }}>
-        @foreach ($presets as $preset)
-            <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>{{ $preset->value }}</option>
-        @endforeach
-    </select>
-    <button id="start-btn" class="primary" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start Recording</button>
-    <button id="stop-btn" class="danger" data-recording="{{ $active->uuid ?? '' }}" {{ $active ? '' : 'disabled' }}>Stop Recording</button>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-        <h3 style="margin:0;">Video Recording</h3>
-        <span class="stat" id="video-status" style="font-size:20px;color:var(--muted);">Unknown</span>
-    </div>
-    <p class="muted" style="margin-top:4px;">Records 1080p video from the rear camera in the background (no preview, not saved to the phone's gallery). The file uploads after you stop, then appears in Recording History below to download.</p>
-    @php $activeVideo = $device->recordings->first(fn($r) => !$r->status->isTerminal() && ($r->media_kind?->value ?? 'AUDIO') === 'VIDEO'); @endphp
-    <button id="video-start-btn" class="primary" {{ $active || $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start Video</button>
-    <button id="video-stop-btn" class="danger" data-recording="{{ $activeVideo->uuid ?? '' }}" {{ $activeVideo ? '' : 'disabled' }}>Stop Video</button>
-    <div style="margin-top:12px;">
-        <label style="font-size:12px;color:var(--muted);">Max duration (minutes, 0 = no limit)
-            <input type="number" id="video-max-minutes" min="0" max="1440" step="1" value="{{ $device->max_video_minutes ?? 0 }}" style="display:block;margin-top:2px;width:120px;">
-        </label>
-        <p class="muted" style="font-size:12px;margin:4px 0 0;">A video recording stops automatically after this many minutes (manual or rule-triggered). Saved as soon as you change it.</p>
-    </div>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <h3 style="margin-top:0;">Flashlight</h3>
-    <p class="muted">Turn the device's camera flashlight (torch) on or off remotely. The device must be online.</p>
-    <button id="flash-on-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Flash On</button>
-    <button id="flash-off-btn" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Turn Flash Off</button>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <h3 style="margin-top:0;">Alert Popup</h3>
-    <p class="muted">Show a full-screen alert with an alarm sound on the device. It keeps sounding until the user taps Dismiss on the phone. The device must be online.</p>
-    @php
-        $alertDefaults = $device->alert_defaults ?? [];
-        $defTitle = $alertDefaults['title'] ?? 'Attention';
-        $defMessage = $alertDefaults['message'] ?? 'Please check this device.';
-        $defVolume = $alertDefaults['volume'] ?? 100;
-        $defBrightness = $alertDefaults['brightness'] ?? 100;
-        $defButtonLabel = $alertDefaults['button_label'] ?? 'Dismiss';
-    @endphp
-    <div style="display:flex;flex-direction:column;gap:8px;max-width:480px;">
-        <input type="text" id="alert-title" placeholder="Title" value="{{ $defTitle }}" maxlength="120">
-        <textarea id="alert-message" placeholder="Message" rows="3" maxlength="500">{{ $defMessage }}</textarea>
-        <input type="text" id="alert-button-label" placeholder="Dismiss button label" value="{{ $defButtonLabel }}" maxlength="40">
-        <div>
-            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Volume: <span id="alert-volume-value">{{ $defVolume }}</span>%</label>
-            <input type="range" id="alert-volume" min="0" max="100" value="{{ $defVolume }}" step="5" style="width:100%;max-width:320px;">
-            <p class="muted" style="font-size:12px;margin:4px 0 0;">The device raises its alarm volume to this level while the alert sounds, then restores it on dismiss. Also used by sensor-rule popups; saved as soon as you release the slider.</p>
-        </div>
-        <div>
-            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Brightness: <span id="alert-brightness-value">{{ $defBrightness }}</span>%</label>
-            <input type="range" id="alert-brightness" min="0" max="100" value="{{ $defBrightness }}" step="5" style="width:100%;max-width:320px;">
-            <p class="muted" style="font-size:12px;margin:4px 0 0;">The device sets its screen brightness to this level while the alert is shown, then restores it on dismiss. Settings are remembered per device.</p>
-        </div>
-        <div>
-            <button id="alert-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Send Alert</button>
-        </div>
-    </div>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <h3 style="margin-top:0;">Scheduled Recordings</h3>
-    <p class="muted">Times are Asia/Jakarta (WIB / UTC+7). Each schedule starts a recording at the given day and time every week and stops it automatically after the set duration.</p>
-
-    <table style="margin-bottom:16px;">
-        <thead><tr><th>Day</th><th>Time</th><th>Preset</th><th>Duration</th><th>Status</th><th>On Device</th><th></th></tr></thead>
-        <tbody>
-        @forelse ($device->schedules as $schedule)
-            <tr>
-                <td>{{ $schedule->dayName() }}</td>
-                <td>{{ \Illuminate\Support\Str::of($schedule->time_of_day)->substr(0, 5) }}</td>
-                <td>{{ $schedule->preset->value }}</td>
-                <td>{{ $schedule->duration_minutes }} min</td>
-                <td>
-                    <form method="POST" action="{{ route('devices.schedules.toggle', [$device, $schedule]) }}" style="display:inline;">
-                        @csrf
-                        <button type="submit" class="{{ $schedule->is_active ? '' : 'muted' }}" style="padding:2px 10px;font-size:12px;">
-                            {{ $schedule->is_active ? 'Active' : 'Disabled' }}
-                        </button>
-                    </form>
-                </td>
-                <td>
-                    @if (! $schedule->is_active)
-                        <span class="muted" title="Disabled schedules aren't pulled by the device.">—</span>
-                    @elseif ($schedule->isSyncedToDevice())
-                        <span title="Device last pulled its schedule list at {{ $device->schedules_synced_at->toDayDateTimeString() }}.">Synced</span>
+                    </select>
+                    @if (!$active)
+                        <button id="start-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start Session</button>
                     @else
-                        <span class="muted" title="Device hasn't pulled this schedule yet — it syncs its list periodically, not instantly on change.">Pending pull…</span>
+                        <button id="stop-btn" class="danger" data-recording="{{ $active->uuid ?? '' }}">Stop Session</button>
                     @endif
-                </td>
-                <td>
-                    <form method="POST" action="{{ route('devices.schedules.destroy', [$device, $schedule]) }}" style="display:inline;" onsubmit="return confirm('Remove this schedule?');">
-                        @csrf
-                        @method('DELETE')
-                        <button type="submit" class="danger" style="padding:4px 10px;font-size:12px;">Remove</button>
-                    </form>
-                </td>
-            </tr>
-        @empty
-            <tr><td colspan="7" class="muted">No schedules yet.</td></tr>
-        @endforelse
-        </tbody>
-    </table>
+                </div>
+                
+                <table style="font-size:12px;background:rgba(255,255,255,0.02);border-radius:8px;">
+                    <thead><tr><th>Preset</th><th>Enc</th><th>Rate</th><th>Bits</th></tr></thead>
+                    <tbody>
+                    @foreach ($previewConfigs as $preset => $config)
+                        <tr><td>{{ $preset }}</td><td>{{ $config['encoder'] }}</td><td>{{ $config['sample_rate'] }}Hz</td><td>{{ $config['bitrate'] ? number_format($config['bitrate'] / 1000).'k' : 'lossless' }}</td></tr>
+                    @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
 
-    <form method="POST" action="{{ route('devices.schedules.store', $device) }}" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-        @csrf
-        <div>
-            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Day</label>
-            <select name="day_of_week" required>
-                <option value="1">Monday</option>
-                <option value="2">Tuesday</option>
-                <option value="3">Wednesday</option>
-                <option value="4">Thursday</option>
-                <option value="5" selected>Friday</option>
-                <option value="6">Saturday</option>
-                <option value="0">Sunday</option>
-            </select>
+        <div class="card">
+            <h3 style="margin-bottom:8px;">Video Recording</h3>
+            <p class="muted" style="margin-bottom:20px;font-size:13px;">Captures 1080p background video from the rear camera.</p>
+            
+            @php $activeVideo = $device->recordings->first(fn($r) => !$r->status->isTerminal() && ($r->media_kind?->value ?? 'AUDIO') === 'VIDEO'); @endphp
+            <div style="display:flex;flex-direction:column;gap:16px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <span id="video-status" class="badge" style="font-size:12px;">Idle</span>
+                    <div style="display:flex;gap:12px;">
+                        @if (!$activeVideo)
+                            <button id="video-start-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Start Video</button>
+                        @else
+                            <button id="video-stop-btn" class="danger" data-recording="{{ $activeVideo->uuid ?? '' }}">Stop Video</button>
+                        @endif
+                    </div>
+                </div>
+                
+                <div style="padding-top:16px;border-top:1px solid var(--border);">
+                    <label class="stat-label" style="display:block;margin-bottom:8px;">Auto-stop after (minutes)</label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <input type="number" id="video-max-minutes" min="0" max="1440" step="1" value="{{ $device->max_video_minutes ?? 0 }}" style="width:100px;">
+                        <span class="muted" style="font-size:12px;">0 = continuous recording until manually stopped.</span>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div>
-            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Time (WIB)</label>
-            <input type="time" name="time_of_day" value="03:30" required>
-        </div>
-        <div>
-            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Preset</label>
-            <select name="preset" required>
-                @foreach ($presets as $preset)
-                    <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>{{ $preset->value }}</option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label style="display:block;font-size:12px;color:var(--muted);margin-bottom:4px;">Duration (minutes)</label>
-            <input type="number" name="duration_minutes" value="30" min="1" max="480" required style="width:90px;">
-        </div>
-        <button type="submit" class="primary">Add Schedule</button>
-    </form>
+    </div>
 
-    @error('day_of_week') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
-    @error('time_of_day') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
-    @error('preset') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
-    @error('duration_minutes') <p style="color:var(--danger);margin-top:8px;">{{ $message }}</p> @enderror
+    <div class="grid cols-2">
+        <div class="card">
+            <h3 style="margin-bottom:8px;">Alert & Alarms</h3>
+            <p class="muted" style="margin-bottom:20px;font-size:13px;">Trigger a full-screen alert with a siren sound.</p>
+            
+            @php
+                $alertDefaults = $device->alert_defaults ?? [];
+                $defTitle = $alertDefaults['title'] ?? 'Attention';
+                $defMessage = $alertDefaults['message'] ?? 'Please check this device.';
+                $defVolume = $alertDefaults['volume'] ?? 100;
+                $defBrightness = $alertDefaults['brightness'] ?? 100;
+                $defButtonLabel = $alertDefaults['button_label'] ?? 'Dismiss';
+            @endphp
+            
+            <div style="display:flex;flex-direction:column;gap:12px;">
+                <input type="text" id="alert-title" placeholder="Alert Title" value="{{ $defTitle }}" maxlength="120">
+                <textarea id="alert-message" placeholder="Message content..." rows="2" maxlength="500">{{ $defMessage }}</textarea>
+                <div class="grid cols-2">
+                    <div>
+                        <label class="stat-label">Volume: <span id="alert-volume-value">{{ $defVolume }}</span>%</label>
+                        <input type="range" id="alert-volume" min="0" max="100" value="{{ $defVolume }}" step="5">
+                    </div>
+                    <div>
+                        <label class="stat-label">Brightness: <span id="alert-brightness-value">{{ $defBrightness }}</span>%</label>
+                        <input type="range" id="alert-brightness" min="0" max="100" value="{{ $defBrightness }}" step="5">
+                    </div>
+                </div>
+                <div style="display:flex;gap:12px;margin-top:8px;">
+                    <input type="text" id="alert-button-label" placeholder="Button Label" value="{{ $defButtonLabel }}" maxlength="40" style="flex:1;">
+                    <button id="alert-btn" class="primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }} style="flex:1;">Send Alert</button>
+                </div>
+                <div style="display:flex;justify-content:flex-end;">
+                    <button id="dismiss-popup-btn" class="btn-sm" style="font-size:11px;">Force Close Remote Popup</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-bottom:8px;">Device Controls</h3>
+            <p class="muted" style="margin-bottom:24px;font-size:13px;">Direct hardware actuator commands.</p>
+            
+            <div class="grid cols-1" style="gap:16px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:16px;background:rgba(255,255,255,0.02);border-radius:12px;">
+                    <div>
+                        <div class="stat-label">Flashlight</div>
+                        <div id="actuator-flash" style="font-weight:700;font-size:18px;">Off</div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button id="flash-on-btn" class="btn-sm primary" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>On</button>
+                        <button id="flash-off-btn" class="btn-sm" {{ $device->status->value === 'OFFLINE' ? 'disabled' : '' }}>Off</button>
+                    </div>
+                </div>
+                
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:16px;background:rgba(255,255,255,0.02);border-radius:12px;">
+                    <div>
+                        <div class="stat-label">Active Popup</div>
+                        <div id="actuator-popup" style="font-weight:700;font-size:18px;">None</div>
+                    </div>
+                    <span class="muted" style="font-size:12px;">Status from device</span>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
-<div class="card">
-    <h3 style="margin-top:0;">Recording History</h3>
-    <table>
-        <thead><tr><th>Recording</th><th>Kind</th><th>Status</th><th>Source</th><th>Started</th><th>Duration</th><th></th></tr></thead>
-        <tbody>
-        @forelse ($device->recordings as $recording)
-            @php $kind = $recording->media_kind?->value ?? 'AUDIO'; @endphp
-            <tr>
-                <td><code>{{ substr($recording->uuid, 0, 8) }}</code></td>
-                <td>{{ $kind === 'VIDEO' ? '🎥 Video' : '🎙 Audio' }}</td>
-                <td><span class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td>
-                <td>{{ $recording->source->value }}</td>
-                <td class="muted">{{ optional($recording->started_at)->diffForHumans() ?? '—' }}</td>
-                <td>{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td>
-                <td>
-                    <a href="{{ route('recordings.show', $recording) }}">View</a>
-                    @if ($recording->status->value === 'COMPLETED')
-                        · <a href="{{ route('recordings.download', $recording) }}">Download</a>
-                    @endif
-                </td>
-            </tr>
-        @empty
-            <tr><td colspan="7" class="muted">No recordings for this device yet.</td></tr>
-        @endforelse
-        </tbody>
-    </table>
+<div id="tab-automation" class="tab-content">
+    <div class="card" style="margin-bottom:32px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h3 style="margin:0;">Sensor Automation Rules</h3>
+            <span id="rules-status" class="muted" style="font-size:12px;"></span>
+        </div>
+        <p class="muted" style="margin-bottom:24px;font-size:13px;">Automate actions based on environmental sensor triggers.</p>
+
+        <div id="rules-list"></div>
+
+        <div style="display:flex;gap:12px;margin-top:20px;padding-top:20px;border-top:1px solid var(--border);">
+            <button id="add-rule-btn" class="btn">+ Add New Rule</button>
+            <button id="save-rules-btn" class="primary">Save Changes</button>
+        </div>
+
+        <template id="rule-template">
+            <div class="card rule-row" style="background:rgba(255,255,255,0.02);margin-bottom:12px;padding:20px;">
+                <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
+                    <div style="flex:1;min-width:140px;">
+                        <label class="stat-label" style="display:block;margin-bottom:6px;">Action</label>
+                        <select class="rule-action">
+                            <option value="POPUP">Show Popup</option>
+                            <option value="FLASH_ON">Flash On</option>
+                            <option value="FLASH_OFF">Flash Off</option>
+                            <option value="VIDEO_START">Start Video</option>
+                            <option value="VIDEO_STOP">Stop Video</option>
+                        </select>
+                    </div>
+                    <div style="flex:1;min-width:140px;">
+                        <label class="stat-label" style="display:block;margin-bottom:6px;">Motion</label>
+                        <select class="rule-motion">
+                            <option value="">(any)</option>
+                            <option value="PICKED_UP">Picked up</option>
+                            <option value="PUT_DOWN">Put down</option>
+                            <option value="STILL">Still</option>
+                            <option value="MOVING">Moving</option>
+                        </select>
+                    </div>
+                    <div style="flex:1.5;min-width:180px;">
+                        <label class="stat-label" style="display:block;margin-bottom:6px;">Light Level (lux)</label>
+                        <div style="display:flex;gap:8px;">
+                            <select class="rule-lux-op" style="width:70px;">
+                                <option value="">(any)</option>
+                                <option value="lt">&lt;</option>
+                                <option value="gt">&gt;</option>
+                            </select>
+                            <input type="number" class="rule-lux-value" placeholder="val" style="flex:1;">
+                        </div>
+                    </div>
+                    <div style="flex:1;min-width:140px;">
+                        <label class="stat-label" style="display:block;margin-bottom:6px;">Proximity</label>
+                        <select class="rule-proximity">
+                            <option value="">(any)</option>
+                            <option value="near">Near (covered)</option>
+                            <option value="far">Far (open)</option>
+                        </select>
+                    </div>
+                    <div style="width:100px;">
+                        <label class="stat-label" style="display:block;margin-bottom:6px;">Delay (s)</label>
+                        <input type="number" class="rule-for-seconds" min="0" placeholder="0">
+                    </div>
+                    <button class="rule-remove danger" style="padding:10px;">Remove</button>
+                </div>
+                
+                <div class="rule-popup-fields" style="margin-top:16px;display:flex;gap:12px;">
+                    <input type="text" class="rule-popup-title" placeholder="Popup Title" style="flex:1;">
+                    <input type="text" class="rule-popup-message" placeholder="Popup Message" style="flex:2;">
+                </div>
+                
+                <div class="rule-videoflash-fields" style="margin-top:16px;">
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+                        <input type="checkbox" class="rule-with-flash"> Also turn on flash when recording starts
+                    </label>
+                </div>
+                
+                <div class="rule-schedule-fields" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;padding-top:16px;border-top:1px dashed var(--border);">
+                    <div>
+                        <label class="stat-label" style="display:block;margin-bottom:8px;">Active Days</label>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                            @foreach (['S' => 0, 'M' => 1, 'T' => 2, 'W' => 3, 'T' => 4, 'F' => 5, 'S' => 6] as $lbl => $d)
+                            <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
+                                <input type="checkbox" class="rule-day" value="{{ $d }}"> {{ $lbl }}
+                            </label>
+                            @endforeach
+                        </div>
+                    </div>
+                    <div>
+                        <label class="stat-label" style="display:block;margin-bottom:6px;">Time Window</label>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="time" class="rule-time-from" style="width:120px;">
+                            <span class="muted">&rarr;</span>
+                            <input type="time" class="rule-time-to" style="width:120px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <div class="card">
+        <h3 style="margin-bottom:20px;">Scheduled Tasks</h3>
+        <table style="margin-bottom:24px;">
+            <thead><tr><th>Day</th><th>Time (WIB)</th><th>Preset</th><th>Duration</th><th>Status</th><th style="text-align:right;">Actions</th></tr></thead>
+            <tbody>
+            @forelse ($device->schedules as $schedule)
+                <tr>
+                    <td style="font-weight:600;">{{ $schedule->dayName() }}</td>
+                    <td><code>{{ \Illuminate\Support\Str::of($schedule->time_of_day)->substr(0, 5) }}</code></td>
+                    <td><span class="badge">{{ $schedule->preset->value }}</span></td>
+                    <td>{{ $schedule->duration_minutes }} min</td>
+                    <td>
+                        <form method="POST" action="{{ route('devices.schedules.toggle', [$device, $schedule]) }}">
+                            @csrf
+                            <button type="submit" class="btn-sm {{ $schedule->is_active ? '' : 'muted' }}" style="padding:4px 12px;font-size:11px;">
+                                {{ $schedule->is_active ? '● Active' : '○ Disabled' }}
+                            </button>
+                        </form>
+                    </td>
+                    <td style="text-align:right;">
+                        <form method="POST" action="{{ route('devices.schedules.destroy', [$device, $schedule]) }}" onsubmit="return confirm('Remove schedule?');">
+                            @csrf @method('DELETE')
+                            <button type="submit" class="danger btn-sm">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+            @empty
+                <tr><td colspan="6" class="muted" style="text-align:center;padding:32px 0;">No active schedules configured.</td></tr>
+            @endforelse
+            </tbody>
+        </table>
+
+        <form method="POST" action="{{ route('devices.schedules.store', $device) }}" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;background:rgba(255,255,255,0.02);padding:20px;border-radius:12px;">
+            @csrf
+            <div style="flex:1;min-width:120px;">
+                <label class="stat-label" style="display:block;margin-bottom:6px;">Repeat Day</label>
+                <select name="day_of_week" required>
+                    <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5" selected>Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+                </select>
+            </div>
+            <div style="width:120px;">
+                <label class="stat-label" style="display:block;margin-bottom:6px;">Start Time</label>
+                <input type="time" name="time_of_day" value="03:30" required>
+            </div>
+            <div style="width:100px;">
+                <label class="stat-label" style="display:block;margin-bottom:6px;">Preset</label>
+                <select name="preset" required>
+                    @foreach ($presets as $preset)
+                        <option value="{{ $preset->value }}" {{ $preset->value === 'HIGH' ? 'selected' : '' }}>{{ $preset->value }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div style="width:100px;">
+                <label class="stat-label" style="display:block;margin-bottom:6px;">Min</label>
+                <input type="number" name="duration_minutes" value="30" min="1" max="480" required>
+            </div>
+            <button type="submit" class="primary" style="height:42px;">Add Schedule</button>
+        </form>
+    </div>
 </div>
+
+<div id="tab-history" class="tab-content">
+    <div class="card" style="padding:0;">
+        <table>
+            <thead><tr><th>Session</th><th>Media</th><th>Status</th><th>Source</th><th>Started</th><th>Duration</th><th style="text-align:right;">Actions</th></tr></thead>
+            <tbody>
+            @forelse ($device->recordings as $recording)
+                @php $kind = $recording->media_kind?->value ?? 'AUDIO'; @endphp
+                <tr>
+                    <td><code>{{ substr($recording->uuid, 0, 8) }}</code></td>
+                    <td>
+                        <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                            {!! $kind === 'VIDEO' ? '🎥 <span class="muted">Video</span>' : '🎙 <span class="muted">Audio</span>' !!}
+                        </span>
+                    </td>
+                    <td><span class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td>
+                    <td class="muted" style="font-size:12px;">{{ $recording->source->value }}</td>
+                    <td class="muted">{{ optional($recording->started_at)->diffForHumans() ?? '—' }}</td>
+                    <td style="font-family:monospace;font-size:13px;">{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td>
+                    <td style="text-align:right;">
+                        <div style="display:inline-flex;gap:8px;">
+                            <a href="{{ route('recordings.show', $recording) }}" class="btn-sm" style="padding:6px 12px;">Details</a>
+                            @if ($recording->status->value === 'COMPLETED')
+                                <a href="{{ route('recordings.download', $recording) }}" class="btn-sm primary" style="padding:6px 12px;">Download</a>
+                            @endif
+                        </div>
+                    </td>
+                </tr>
+            @empty
+                <tr><td colspan="7" class="muted" style="text-align:center;padding:64px 0;">No recording history for this device.</td></tr>
+            @endforelse
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function openTab(evt, tabName) {
+    var i, tabcontent, tablinks;
+    tabcontent = document.getElementsByClassName("tab-content");
+    for (i = 0; i < tabcontent.length; i++) { tabcontent[i].classList.remove("active"); }
+    tablinks = document.getElementsByClassName("tab-link");
+    for (i = 0; i < tablinks.length; i++) { tablinks[i].classList.remove("active"); }
+    document.getElementById(tabName).classList.add("active");
+    evt.currentTarget.classList.add("active");
+    localStorage.setItem('activeDeviceTab', tabName);
+}
+
+// Restore active tab
+document.addEventListener('DOMContentLoaded', () => {
+    const savedTab = localStorage.getItem('activeDeviceTab');
+    if (savedTab && document.getElementById(savedTab)) {
+        const btn = Array.from(document.querySelectorAll('.tab-link')).find(b => b.getAttribute('onclick').includes(savedTab));
+        if (btn) btn.click();
+    }
+});
+</script>
 @endsection
 
 @push('scripts')
 <script>
-document.getElementById('start-btn').addEventListener('click', async (e) => {
+document.getElementById('start-btn')?.addEventListener('click', async (e) => {
     const preset = document.getElementById('preset-select').value;
     e.target.disabled = true;
     try {
@@ -390,7 +466,7 @@ document.getElementById('start-btn').addEventListener('click', async (e) => {
     }
 });
 
-document.getElementById('stop-btn').addEventListener('click', async (e) => {
+document.getElementById('stop-btn')?.addEventListener('click', async (e) => {
     const recordingUuid = e.target.dataset.recording;
     if (!recordingUuid) return;
     e.target.disabled = true;
@@ -405,7 +481,7 @@ document.getElementById('stop-btn').addEventListener('click', async (e) => {
 });
 
 /* Video recording start/stop. */
-document.getElementById('video-start-btn').addEventListener('click', async (e) => {
+document.getElementById('video-start-btn')?.addEventListener('click', async (e) => {
     e.target.disabled = true;
     try {
         await window.apiFetch('/api/recordings/video/start', { method: 'POST', body: JSON.stringify({ device_id: {{ $device->id }} }) });
@@ -417,7 +493,7 @@ document.getElementById('video-start-btn').addEventListener('click', async (e) =
     }
 });
 
-document.getElementById('video-stop-btn').addEventListener('click', async (e) => {
+document.getElementById('video-stop-btn')?.addEventListener('click', async (e) => {
     const recordingUuid = e.target.dataset.recording;
     if (!recordingUuid) return;
     e.target.disabled = true;
@@ -432,7 +508,7 @@ document.getElementById('video-stop-btn').addEventListener('click', async (e) =>
 });
 
 /* Save the max video duration as soon as it's changed. */
-document.getElementById('video-max-minutes').addEventListener('change', async (e) => {
+document.getElementById('video-max-minutes')?.addEventListener('change', async (e) => {
     const minutes = parseInt(e.target.value, 10);
     try {
         await window.apiFetch(`/api/devices/{{ $device->id }}/video/settings`, {
@@ -454,12 +530,11 @@ async function setFlash(on) {
     }
 }
 
-document.getElementById('flash-on-btn').addEventListener('click', () => setFlash(true));
-document.getElementById('flash-off-btn').addEventListener('click', () => setFlash(false));
+document.getElementById('flash-on-btn')?.addEventListener('click', () => setFlash(true));
+document.getElementById('flash-off-btn')?.addEventListener('click', () => setFlash(false));
 
 /* Inline actuator controls on the Live Sensors card. */
-document.getElementById('flash-off-inline-btn').addEventListener('click', () => setFlash(false));
-document.getElementById('dismiss-popup-btn').addEventListener('click', async () => {
+document.getElementById('dismiss-popup-btn')?.addEventListener('click', async () => {
     try {
         await window.apiFetch(`/api/devices/{{ $device->id }}/alert/dismiss`, { method: 'POST' });
         window.showToast('Close popup requested.');
@@ -537,8 +612,8 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
         return rule;
     });
 
-    document.getElementById('add-rule-btn').addEventListener('click', () => addRow(null));
-    document.getElementById('save-rules-btn').addEventListener('click', async (e) => {
+    document.getElementById('add-rule-btn')?.addEventListener('click', () => addRow(null));
+    document.getElementById('save-rules-btn')?.addEventListener('click', async (e) => {
         e.target.disabled = true;
         const statusEl = document.getElementById('rules-status');
         try {
@@ -559,12 +634,12 @@ document.getElementById('dismiss-popup-btn').addEventListener('click', async () 
 })();
 
 const alertVolume = document.getElementById('alert-volume');
-alertVolume.addEventListener('input', () => {
+alertVolume?.addEventListener('input', () => {
     document.getElementById('alert-volume-value').textContent = alertVolume.value;
 });
 
 const alertBrightness = document.getElementById('alert-brightness');
-alertBrightness.addEventListener('input', () => {
+alertBrightness?.addEventListener('input', () => {
     document.getElementById('alert-brightness-value').textContent = alertBrightness.value;
 });
 
@@ -581,10 +656,10 @@ async function saveAlertLevels() {
         window.showToast(err.message, true);
     }
 }
-alertVolume.addEventListener('change', saveAlertLevels);
-alertBrightness.addEventListener('change', saveAlertLevels);
+alertVolume?.addEventListener('change', saveAlertLevels);
+alertBrightness?.addEventListener('change', saveAlertLevels);
 
-document.getElementById('alert-btn').addEventListener('click', async (e) => {
+document.getElementById('alert-btn')?.addEventListener('click', async (e) => {
     const title = document.getElementById('alert-title').value.trim();
     const message = document.getElementById('alert-message').value.trim();
     const volume = parseInt(alertVolume.value, 10);
@@ -678,7 +753,7 @@ document.getElementById('alert-btn').addEventListener('click', async (e) => {
         }
 
         const when = payload.at ? new Date(payload.at).toLocaleTimeString() : new Date().toLocaleTimeString();
-        document.getElementById('sensors-updated').textContent = `updated ${when}`;
+        setStatus(`updated ${when}`);
     });
     });
 })();

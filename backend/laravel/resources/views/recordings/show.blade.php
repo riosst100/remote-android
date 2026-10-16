@@ -3,95 +3,100 @@
 @section('title', 'Recording ' . substr($recording->uuid, 0, 8))
 
 @section('content')
-<p><a href="{{ route('recordings.index') }}">&larr; Recordings</a></p>
-<h2 style="margin-top:0;">Recording <code>{{ $recording->uuid }}</code> <span id="realtime-indicator" class="muted" style="font-size:12px;font-weight:400;"></span></h2>
-
-<div id="error-banner" @if (! $recording->error_message) hidden @endif class="card" style="border-color:var(--danger);margin-bottom:16px;">
-    <strong style="color:var(--danger);">Error:</strong> <span id="error-message">{{ $recording->error_message }}</span>
+<div style="margin-bottom:24px;">
+    <a href="{{ route('recordings.index') }}" class="muted" style="font-size:13px;display:flex;align-items:center;gap:6px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        Back to Recordings
+    </a>
 </div>
 
-<div class="grid cols-2" style="margin-bottom:24px;">
-    <div class="card">
-        <h3 style="margin-top:0;">Overview</h3>
-        <table>
-            <tr><th>Device</th><td><a href="{{ route('devices.show', $recording->device) }}">{{ $recording->device->name ?? $recording->device->device_uuid }}</a></td></tr>
-            <tr><th>Status</th><td><span id="recording-status" class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td></tr>
-            <tr><th>Source</th><td><span class="badge">{{ $recording->source->value }}</span></td></tr>
-            <tr><th>Started</th><td>{{ optional($recording->started_at)->toDayDateTimeString() ?? '—' }}</td></tr>
-            <tr><th>Stopped</th><td>{{ optional($recording->stopped_at)->toDayDateTimeString() ?? '—' }}</td></tr>
-            <tr><th>Duration</th><td>{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td></tr>
-        </table>
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:32px;">
+    <div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+            <span class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span>
+            <span class="badge" style="background:rgba(255,255,255,0.05);">{{ $recording->media_kind?->value ?? 'AUDIO' }}</span>
+        </div>
+        <h1 style="font-family:monospace;">{{ substr($recording->uuid, 0, 18) }}<span class="muted">...</span> <span id="realtime-indicator" class="muted" style="font-size:12px;font-weight:400;"></span></h1>
     </div>
-    <div class="card">
-        <h3 style="margin-top:0;">Audio Configuration</h3>
-        <table>
-            <tr><th>Preset</th><td>{{ $recording->preset->value }}</td></tr>
-            <tr><th>Encoder</th><td>{{ $recording->encoder ?? '—' }}</td></tr>
-            <tr><th>Sample Rate</th><td>{{ $recording->sample_rate ? $recording->sample_rate.' Hz' : '—' }}</td></tr>
-            <tr><th>Bitrate</th><td>{{ $recording->bitrate ? number_format($recording->bitrate / 1000).' kbps' : '—' }}</td></tr>
-            <tr><th>Channels</th><td>{{ $recording->channels ?? '—' }}</td></tr>
-        </table>
-    </div>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <h3 style="margin-top:0;">Upload &amp; Merge Progress</h3>
-    <table>
-        <tr>
-            <th>Parts uploaded</th>
-            <td id="upload-progress-text">{{ $recording->chunks->count() }} part{{ $recording->chunks->count() === 1 ? '' : 's' }} received so far</td>
-        </tr>
-        <tr>
-            <th>Merge status</th>
-            <td id="merge-status-text">
-                @switch($recording->status->value)
-                    @case('COMPLETED')
-                        Merged into the final file below.
-                        @break
-                    @case('PROCESSING')
-                        Device finished recording — waiting for all parts to arrive, then merging.
-                        @break
-                    @case('STOPPING')
-                        Device is still uploading parts.
-                        @break
-                    @case('FAILED')
-                        Merge did not complete — see the error above.
-                        @break
-                    @default
-                        Recording in progress.
-                @endswitch
-            </td>
-        </tr>
-    </table>
-</div>
-
-<div class="card" style="margin-bottom:24px;">
-    <h3 style="margin-top:0;">Final File</h3>
     @if ($recording->file_path)
-        <table>
-            <tr><th>Size</th><td>{{ number_format($recording->file_size / 1024, 1) }} KB</td></tr>
-            <tr><th>MIME Type</th><td>{{ $recording->mime_type }}</td></tr>
-        </table>
-        <a class="btn primary" href="{{ route('recordings.download', $recording) }}">Download</a>
-    @else
-        <p class="muted">Not finalized yet.</p>
+        <a class="btn primary" href="{{ route('recordings.download', $recording) }}" style="padding:12px 24px;">Download Final File</a>
     @endif
 </div>
 
-<div class="card">
-    <h3 style="margin-top:0;">Parts (<span id="chunk-count">{{ $recording->chunks->count() }}</span>)</h3>
+<div id="error-banner" @if (! $recording->error_message) hidden @endif class="card" style="border-color:var(--danger);background:rgba(239,68,68,0.05);margin-bottom:32px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--danger);"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <div>
+            <strong style="color:var(--danger);display:block;font-size:13px;">Execution Error</strong>
+            <span id="error-message" style="font-size:14px;">{{ $recording->error_message }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="grid cols-2" style="margin-bottom:32px;">
+    <div class="card">
+        <h3 style="margin-bottom:20px;">Session Overview</h3>
+        <table class="muted" style="font-size:13px;">
+            <tr><th style="width:140px;">Device</th><td><a href="{{ route('devices.show', $recording->device) }}" style="font-weight:700;color:var(--text);">{{ $recording->device->name ?? $recording->device->device_uuid }}</a></td></tr>
+            <tr><th>Status</th><td><span id="recording-status" class="badge {{ $recording->status->value }}">{{ $recording->status->value }}</span></td></tr>
+            <tr><th>Source</th><td><span class="badge" style="background:rgba(255,255,255,0.05);">{{ $recording->source->value }}</span></td></tr>
+            <tr><th>Started</th><td style="color:var(--text);">{{ optional($recording->started_at)->toDayDateTimeString() ?? '—' }}</td></tr>
+            <tr><th>Stopped</th><td style="color:var(--text);">{{ optional($recording->stopped_at)->toDayDateTimeString() ?? '—' }}</td></tr>
+            <tr><th>Duration</th><td style="font-family:monospace;font-size:14px;color:var(--accent);font-weight:700;">{{ $recording->duration ? gmdate('H:i:s', $recording->duration) : '—' }}</td></tr>
+        </table>
+    </div>
+    <div class="card">
+        <h3 style="margin-bottom:20px;">Configuration</h3>
+        <table class="muted" style="font-size:13px;">
+            <tr><th style="width:140px;">Preset</th><td style="color:var(--text);font-weight:700;">{{ $recording->preset->value }}</td></tr>
+            <tr><th>Encoder</th><td>{{ $recording->encoder ?? '—' }}</td></tr>
+            <tr><th>Sample Rate</th><td>{{ $recording->sample_rate ? number_format($recording->sample_rate).' Hz' : '—' }}</td></tr>
+            <tr><th>Bitrate</th><td>{{ $recording->bitrate ? number_format($recording->bitrate / 1000).' kbps' : '—' }}</td></tr>
+            <tr><th>Channels</th><td>{{ $recording->channels === 1 ? 'Mono' : ($recording->channels === 2 ? 'Stereo' : $recording->channels) }}</td></tr>
+        </table>
+    </div>
+</div>
+
+<div class="grid cols-1" style="margin-bottom:32px;">
+    <div class="card">
+        <h3 style="margin-bottom:20px;">Upload & Merge Status</h3>
+        <div style="display:flex;gap:32px;align-items:center;padding:24px;background:rgba(255,255,255,0.02);border-radius:12px;">
+            <div style="flex:1;">
+                <div class="stat-label" style="margin-bottom:8px;">Chunks Received</div>
+                <div id="upload-progress-text" style="font-size:24px;font-weight:800;font-family:monospace;">{{ $recording->chunks->count() }} <span class="muted" style="font-size:14px;font-weight:400;">parts</span></div>
+            </div>
+            <div style="flex:2;padding-left:32px;border-left:1px solid var(--border);">
+                <div class="stat-label" style="margin-bottom:8px;">Merge Operation</div>
+                <div id="merge-status-text" style="font-size:14px;font-weight:600;">
+                    @switch($recording->status->value)
+                        @case('COMPLETED') Merged successfully. Final file ready. @break
+                        @case('PROCESSING') Waiting for all chunks to arrive, then merging. @break
+                        @case('STOPPING') Device is still uploading remaining parts. @break
+                        @case('FAILED') Merge failed or was interrupted. @break
+                        @default Recording in progress. @break
+                    @endswitch
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="padding:0;">
+    <div style="padding:24px 24px 12px;">
+        <h3 style="margin:0;">Uploaded Parts (<span id="chunk-count">{{ $recording->chunks->count() }}</span>)</h3>
+    </div>
     <table>
-        <thead><tr><th>#</th><th>Size</th><th>MIME</th><th>Uploaded</th></tr></thead>
+        <thead><tr><th>#</th><th>Size</th><th>MIME Type</th><th>Uploaded At</th></tr></thead>
         <tbody id="chunk-table-body">
         @forelse ($recording->chunks as $chunk)
             <tr>
-                <td>{{ $chunk->chunk_number }}</td>
+                <td style="font-family:monospace;font-weight:700;">#{{ $chunk->chunk_number }}</td>
                 <td>{{ number_format($chunk->size / 1024, 1) }} KB</td>
-                <td>{{ $chunk->mime_type }}</td>
-                <td class="muted">{{ optional($chunk->uploaded_at)->diffForHumans() }}</td>
+                <td class="muted" style="font-size:12px;">{{ $chunk->mime_type }}</td>
+                <td class="muted" style="font-size:13px;">{{ optional($chunk->uploaded_at)->toDayDateTimeString() }}</td>
             </tr>
         @empty
-            <tr><td colspan="4" class="muted">No parts uploaded yet (or already merged into the final file).</td></tr>
+            <tr><td colspan="4" class="muted" style="text-align:center;padding:48px 0;">No chunks received yet.</td></tr>
         @endforelse
         </tbody>
     </table>
